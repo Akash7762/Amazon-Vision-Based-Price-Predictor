@@ -12,6 +12,8 @@ data/*
 *.pth
 *.onnx
 *.h5
+model/checkpoints/
+model/logs/
 
 # Node/Next.js
 node_modules/
