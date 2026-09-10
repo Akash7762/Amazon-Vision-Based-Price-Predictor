@@ -1,0 +1,2 @@
+# Amazon Vision-Based Price Prediction System
+# Phase 0: Initial dependencies (currently empty)
