@@ -20,9 +20,15 @@ Usage (local sanity check):
     python model/train.py --subset-mode dev --epochs 1 --batch-size 16 \
         --lr 1e-4 --max-batches 5 --checkpoint-dir model/checkpoints
 
-Usage (Kaggle, full run — for reference, run there not here):
+Usage (Kaggle, full run — for reference, run there not here). Note that the
+Kaggle inputs live under the read-only /kaggle/input tree, so the default
+relative paths do not exist there and MUST be overridden:
     python model/train.py --subset-mode full --epochs 15 --batch-size 64 \
-        --lr 1e-4 --checkpoint-dir /kaggle/working/checkpoints
+        --lr 1e-4 --num-workers 4 \
+        --metadata /kaggle/input/<metadata-dataset>/metadata.csv \
+        --image-dir /kaggle/input/<images-dataset>/images \
+        --checkpoint-dir /kaggle/working/checkpoints \
+        --log-path /kaggle/working/logs/train.log
 """
 import argparse
 import json
@@ -52,7 +58,11 @@ SUBSET_PATHS = {
 
 
 def setup_logging(log_path: str) -> logging.Logger:
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    # dirname("train.log") is "" — makedirs("") raises FileNotFoundError, so
+    # only create a directory when the path actually names one.
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
     logger = logging.getLogger("train")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
@@ -116,7 +126,14 @@ def run_epoch(model, loader, loss_fn, optimizer, device, logger, epoch, split_na
 
 def main():
     parser = argparse.ArgumentParser(description="Train the price-regression model.")
-    parser.add_argument("--subset-mode", choices=["dev", "full"], required=True)
+    parser.add_argument("--subset-mode", choices=["dev", "full"], required=True,
+                         help="Selects the default metadata/image paths. Override either "
+                              "with --metadata / --image-dir (required on Kaggle, where "
+                              "inputs live under the read-only /kaggle/input tree).")
+    parser.add_argument("--metadata", default=None,
+                         help="Override the metadata CSV path for the chosen subset mode.")
+    parser.add_argument("--image-dir", default=None,
+                         help="Override the resized-image directory for the chosen subset mode.")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -129,7 +146,21 @@ def main():
     parser.add_argument("--no-pretrained", dest="pretrained", action="store_false")
     args = parser.parse_args()
 
-    paths = SUBSET_PATHS[args.subset_mode]
+    paths = dict(SUBSET_PATHS[args.subset_mode])
+    if args.metadata:
+        paths["metadata"] = args.metadata
+    if args.image_dir:
+        paths["image_dir"] = args.image_dir
+
+    for label, path in (("metadata CSV", paths["metadata"]), ("image dir", paths["image_dir"])):
+        if not os.path.exists(path):
+            raise SystemExit(
+                f"ERROR: {label} not found at '{path}'.\n"
+                f"With --subset-mode {args.subset_mode} the default is "
+                f"'{SUBSET_PATHS[args.subset_mode]['metadata' if label.startswith('metadata') else 'image_dir']}'. "
+                f"On Kaggle, pass --metadata and --image-dir pointing into /kaggle/input/..."
+            )
+
     logger = setup_logging(args.log_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
