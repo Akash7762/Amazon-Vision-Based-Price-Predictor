@@ -24,3 +24,6 @@ out/
 .vscode/
 .idea/
 .DS_Store
+
+# Tooling output
+graphify-out/
