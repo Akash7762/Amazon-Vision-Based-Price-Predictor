@@ -12,6 +12,8 @@ data/*
 *.pth
 *.onnx
 *.h5
+model/checkpoints/
+model/logs/
 
 # Node/Next.js
 node_modules/
@@ -22,3 +24,6 @@ out/
 .vscode/
 .idea/
 .DS_Store
+
+# Tooling output
+graphify-out/
