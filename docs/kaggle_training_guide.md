@@ -217,55 +217,42 @@ already has a CUDA build of torch. `requirements.txt` pins the CPU-only
 wheel for the local Windows machine, and installing it would replace the GPU
 build.
 
-### B2. Find the images (unzip only if needed)
+### B2. Point at the images
+
+Kaggle now mounts datasets under your username, one level deeper than older
+guides assume:
+
+```
+/kaggle/input/datasets/<username>/<dataset-name>/...
+```
+
+It also extracted `images.zip` on import, so the images sit in a plain
+`images/` folder and training reads them straight from the input. No unzip
+step needed.
 
 ```python
-import os, time, zipfile, pandas as pd
+import os, pandas as pd
 
-def scan(top="/kaggle/input", max_depth=4):
-    """One pass over the inputs. Never goes deeper into a folder of images."""
-    meta, zips, imgdirs = [], [], []
-    for root, dirs, files in os.walk(top):
-        if "metadata.csv" in files: meta.append(os.path.join(root, "metadata.csv"))
-        if "images.zip" in files:   zips.append(os.path.join(root, "images.zip"))
-        n = sum(f.endswith(".jpg") for f in files)
-        if n > 70000: imgdirs.append(root)
-        if n > 1000 or root[len(top):].count(os.sep) >= max_depth:
-            dirs[:] = []
-    return meta, zips, imgdirs
-
-t0 = time.time()
-meta, zips, imgdirs = scan()
-print(f"scan: {time.time()-t0:.0f}s\n meta={meta}\n zips={zips}\n imgdirs={imgdirs}")
-META = meta[0]
-
-if imgdirs:
-    # Kaggle already extracted the zip on import: read straight from the input, no copy needed
-    IMG = imgdirs[0]
-elif zips:
-    t = time.time()
-    if os.system(f"unzip -q -o '{zips[0]}' -d /tmp") != 0:
-        with zipfile.ZipFile(zips[0]) as z:
-            z.extractall("/tmp")
-    IMG = "/tmp/images"
-    print(f"unzip: {time.time()-t:.0f}s")
+META = "/kaggle/input/datasets/akashverma7762/amazon-price-metadata/metadata.csv"
+IMG  = "/kaggle/input/datasets/akashverma7762/amazon-price-images-v2/images"
 
 ids  = set(pd.read_csv(META)["sample_id"].astype(str))
 have = {f[:-4] for f in os.listdir(IMG) if f.endswith(".jpg")}
 print(f"META={META}\nIMG={IMG}\nimages={len(have)} missing={len(ids - have)}")
-assert len(ids - have) < 100
+assert len(ids - have) < 100, "images missing - check the attached datasets"
 
 man = os.path.join(IMG, "_preprocessing.json")
 print(open(man).read() if os.path.exists(man) else "no manifest found")
 ```
 
-**Check:** `missing` is in single digits. `scan` should take seconds and
-`unzip` (only if the dataset is still a zip) a few minutes. If `imgdirs`
-lists more than one folder, you've attached the old dataset too. Detach it.
+**Check:** `images=73517 missing=0` (what the Sep 26 run showed) and
+`"resize_mode": "letterbox_pad"` in the manifest.
 
-An earlier version of this cell used recursive `glob` three times. When
-Kaggle has already extracted the images, each of those searches walks all
-~73k files on the slow input mount, and the cell seems to hang.
+Don't search `/kaggle/input` with a recursive `glob` or `os.walk`. It walks
+the 73k-file image folder on a slow mount: a single pass took 64 s, and the
+first version of this cell did three of them and looked hung. If the paths
+ever change, find them with `!ls /kaggle/input/datasets/<username>/*/`
+instead.
 
 ### B3. Smoke test (5 batches)
 
@@ -302,8 +289,16 @@ seconds per epoch  ≈ (train elapsed / 100) × 804  +  (val elapsed / 100) × 1
 epochs that fit    ≈ (8 hrs × 3600) / seconds per epoch
 ```
 
-8 hours rather than 9 leaves room for setup (clone, unzip, pretrained
-weights) and the final cell.
+8 hours rather than 9 leaves room for setup (clone, pretrained weights)
+and the final cell.
+
+**Measured on Sep 26 (T4, `--num-workers 4`, images read from
+`/kaggle/input`):** train 105.8 s and val 30.4 s per 100 batches, so about
+850 + 53 ≈ 900 s (15 min) per epoch, about 3.8 hours for 15 epochs. Roughly
+1 s per training batch is slow for ConvNeXt-Tiny on a T4, which points at
+data loading (JPEG decode + augmentation on 4 CPUs, reading from the input
+mount) rather than the GPU. That's fast enough for 15 epochs, so it's left
+alone for now.
 
 If 15 epochs fit, use 15. If not, use what fits and continue in a second
 session with step B7. A committed run that hits the session limit is the one
@@ -373,7 +368,8 @@ Make the finished run's output into a Dataset (Output → New Dataset, e.g.
 swap the B5 cell for:
 
 ```python
-PREV = glob.glob("/kaggle/input/amazon-price-run1/**/checkpoints", recursive=True)[0]
+PREV = "/kaggle/input/datasets/akashverma7762/amazon-price-run1/checkpoints"
+print(sorted(os.listdir(PREV)))   # confirm the epoch_N.pt you're resuming from
 !python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
     --epochs 15 --batch-size 64 --lr 1e-4 --num-workers 4 \
     --resume-from {PREV}/epoch_7.pt \
@@ -403,6 +399,17 @@ Phase 3 can attach `best.pt` without re-uploading it.
 ### B9. Read the curve and decide
 
 This is roadmap Phase 2, step 4.
+
+**First, the bar to beat.** A "model" that ignores the image and always
+predicts the median train price ($14.00) scores **val SmoothL1 = 14.03**
+(MAE $14.52). The model has to get clearly below that to have learned
+anything from the images. The 100-batch timing run on Sep 26 already reached
+12.86 on part of the val set, so it's starting to move. Where the full run
+ends up relative to 14.03 is the number worth putting in the report.
+
+Reading the loss: with `beta=1`, SmoothL1 is roughly MAE − 0.5 once errors
+are above $1, so a val loss of 10 means the typical prediction is about $10.50
+off.
 
 | What you see | What it means | What to do next |
 |---|---|---|
