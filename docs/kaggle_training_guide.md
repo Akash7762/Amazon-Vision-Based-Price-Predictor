@@ -38,7 +38,7 @@ before relying on them.
 | `/kaggle/input` | read-only | Checkpoints go to `/kaggle/working`, never next to the inputs. |
 | Internet | needs a phone-verified account | Required for `git clone`, `pip`, pretrained weights, and image downloads. |
 | CPU cores | ~4 | `--num-workers 4`. Data loading may be the bottleneck, not the GPU. |
-| GPU choice | P100 or T4 ×2 | Both work. The script uses **one** GPU, so the second T4 sits idle. |
+| GPU choice | T4 ×2 or P100 | Pick **T4 ×2**. Recent PyTorch builds have been dropping support for older GPUs like the P100. The script uses **one** GPU, so the second T4 sits idle. |
 | Committed runs | start from a **fresh** environment and run every cell top to bottom | Every cell must stand alone. Nothing from your interactive session carries over. |
 
 ---
@@ -191,7 +191,7 @@ extract it into an `images/` folder. Step B2 handles both.
 
 ## Notebook B — Train (GPU)
 
-New Notebook → Accelerator **GPU** (P100 or T4), Internet **On**. Attach
+New Notebook → Accelerator **GPU T4 ×2**, Internet **On**. Attach
 `amazon-price-images-v2` and the metadata dataset.
 
 Every cell below must work in a fresh session, because the commit runs them
@@ -240,6 +240,9 @@ ids  = set(pd.read_csv(META)["sample_id"].astype(str))
 have = {f[:-4] for f in os.listdir(IMG) if f.endswith(".jpg")}
 print(f"META={META}\nIMG={IMG}\nimages={len(have)} missing={len(ids - have)}")
 assert len(ids - have) < 100
+
+man = os.path.join(IMG, "_preprocessing.json")
+print(open(man).read() if os.path.exists(man) else "no manifest found")
 ```
 
 **Check:** `missing` is in single digits. If `cands` lists more than one
@@ -271,19 +274,24 @@ Run this interactively. It does a 100-batch slice and times it:
     --checkpoint-dir /tmp/timing --log-path /tmp/timing/t.log --log-every 0
 ```
 
-Read `elapsed_sec` from the `split=train DONE` line. Then:
+Read `elapsed_sec` from the `split=train DONE` and `split=val DONE` lines.
+A full epoch is 804 train batches (51,461 rows ÷ 64, last partial batch
+dropped) and 173 val batches (11,028 ÷ 64, rounded up). So:
 
 ```
-seconds per epoch  ≈ (train elapsed / 100) × (51,000 / 64)  +  a full val pass
-epochs that fit    ≈ (9 hrs × 3600) / seconds per epoch
+seconds per epoch  ≈ (train elapsed / 100) × 804  +  (val elapsed / 100) × 173
+epochs that fit    ≈ (8 hrs × 3600) / seconds per epoch
 ```
+
+8 hours rather than 9 leaves room for setup (clone, unzip, pretrained
+weights) and the final cell.
 
 If 15 epochs fit, use 15. If not, use what fits and continue in a second
 session with step B7. A committed run that hits the session limit is the one
 really expensive mistake in this workflow.
 
-Also look at GPU use during the timing run (`!nvidia-smi` in another cell).
-If it's low, the 4 CPUs decoding and augmenting JPEGs are the bottleneck.
+Also watch the GPU usage bar in the editor's right-hand panel during the
+timing run. If it stays low, the 4 CPUs decoding and augmenting JPEGs are the bottleneck.
 That's normal on Kaggle. It means a faster GPU wouldn't help, not that
 something is broken.
 
