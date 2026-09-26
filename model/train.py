@@ -29,11 +29,19 @@ relative paths do not exist there and MUST be overridden:
         --image-dir /kaggle/input/<images-dataset>/images \
         --checkpoint-dir /kaggle/working/checkpoints \
         --log-path /kaggle/working/logs/train.log
+
+Resuming after a Kaggle session timeout (attach the previous run's output as
+a dataset, then point --resume-from at its checkpoints). Note that --epochs
+is the FINAL epoch number, not a count of extra epochs:
+    python model/train.py --subset-mode full --epochs 15 ... \
+        --resume-from /kaggle/input/<previous-run>/checkpoints/epoch_7.pt \
+        --checkpoint-dir /kaggle/working/checkpoints
 """
 import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 
@@ -79,7 +87,7 @@ def setup_logging(log_path: str) -> logging.Logger:
 
 
 def run_epoch(model, loader, loss_fn, optimizer, device, logger, epoch, split_name,
-              max_batches=None):
+              max_batches=None, log_every=50):
     is_train = optimizer is not None
     model.train(is_train)
 
@@ -110,10 +118,14 @@ def run_epoch(model, loader, loss_fn, optimizer, device, logger, epoch, split_na
             n_samples += images.size(0)
             n_batches += 1
 
-            logger.info(
-                f"epoch={epoch} split={split_name} batch={batch_idx} "
-                f"batch_loss={loss.item():.4f}"
-            )
+            # Log every Nth batch rather than every batch: a full epoch is
+            # ~800 batches at batch_size=64, and 15 epochs of per-batch lines
+            # makes the Kaggle notebook output unusably large.
+            if log_every > 0 and batch_idx % log_every == 0:
+                logger.info(
+                    f"epoch={epoch} split={split_name} batch={batch_idx} "
+                    f"batch_loss={loss.item():.4f}"
+                )
 
     elapsed = time.time() - start
     avg_loss = total_loss / max(n_samples, 1)
@@ -122,6 +134,50 @@ def run_epoch(model, loader, loss_fn, optimizer, device, logger, epoch, split_na
         f"batches={n_batches} samples={n_samples} elapsed_sec={elapsed:.1f}"
     )
     return avg_loss
+
+
+def history_path(checkpoint_dir: str) -> str:
+    return os.path.join(checkpoint_dir, "history.json")
+
+
+def save_history(checkpoint_dir: str, history) -> None:
+    with open(history_path(checkpoint_dir), "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def load_history(checkpoint_dir: str):
+    path = history_path(checkpoint_dir)
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        return json.load(f)
+
+
+def resolve_resume_path(resume_from: str, checkpoint_dir: str) -> str:
+    """Resolve --resume-from to a concrete checkpoint file.
+
+    'latest' picks the highest-numbered epoch_N.pt in checkpoint_dir - the
+    common case on Kaggle, where you re-attach the previous run's output and
+    just want to carry on from wherever it died.
+    """
+    if resume_from != "latest":
+        if not os.path.exists(resume_from):
+            raise SystemExit(f"ERROR: --resume-from checkpoint not found at '{resume_from}'.")
+        return resume_from
+
+    names = os.listdir(checkpoint_dir) if os.path.isdir(checkpoint_dir) else []
+    candidates = []
+    for name in names:
+        match = re.fullmatch(r"epoch_(\d+)\.pt", name)
+        if match:
+            candidates.append((int(match.group(1)), os.path.join(checkpoint_dir, name)))
+    if not candidates:
+        raise SystemExit(
+            f"ERROR: --resume-from latest found no epoch_N.pt files in "
+            f"'{checkpoint_dir}'. Point --checkpoint-dir at the directory holding the "
+            f"previous run's checkpoints, or pass an explicit path."
+        )
+    return max(candidates)[1]
 
 
 def main():
@@ -144,6 +200,16 @@ def main():
                          help="Cap batches per epoch (for quick sanity checks). None = full epoch.")
     parser.add_argument("--pretrained", action="store_true", default=True)
     parser.add_argument("--no-pretrained", dest="pretrained", action="store_false")
+    parser.add_argument("--resume-from", default=None,
+                         help="Resume from a checkpoint written by a previous run. Either a "
+                              "path to a .pt file, or the literal 'latest' to pick the "
+                              "highest-numbered epoch_N.pt in --checkpoint-dir. Training "
+                              "continues at the epoch after the one stored in the checkpoint, "
+                              "and --epochs is still the FINAL epoch number, not a count of "
+                              "additional epochs.")
+    parser.add_argument("--log-every", type=int, default=50,
+                         help="Log a batch_loss line every N batches (0 disables per-batch "
+                              "logging). Epoch summaries are always logged.")
     args = parser.parse_args()
 
     paths = dict(SUBSET_PATHS[args.subset_mode])
@@ -188,10 +254,13 @@ def main():
             f"Did you run scripts/download_images.py for this metadata/image_dir pair?"
         )
 
+    # pin_memory only helps (and only makes sense) when copying to a GPU.
+    pin_memory = device.type == "cuda"
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                               num_workers=args.num_workers, drop_last=True)
+                               num_workers=args.num_workers, drop_last=True,
+                               pin_memory=pin_memory)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                             num_workers=args.num_workers)
+                             num_workers=args.num_workers, pin_memory=pin_memory)
 
     model = build_model(pretrained=args.pretrained).to(device)
     loss_fn = build_loss_fn()
@@ -200,45 +269,78 @@ def main():
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     history = []
     best_val_loss = float("inf")
+    start_epoch = 1
 
-    for epoch in range(1, args.epochs + 1):
+    if args.resume_from:
+        ckpt_path = resolve_resume_path(args.resume_from, args.checkpoint_dir)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        # The loss curve so far lives in the checkpoint (newer runs) or in
+        # history.json next to it (checkpoints written before that was added).
+        history = ckpt.get("history") or load_history(args.checkpoint_dir)
+        history = [h for h in history if h["epoch"] < start_epoch]
+        best_val_loss = min((h["val_loss"] for h in history), default=float("inf"))
+
+        prev_args = ckpt.get("args", {})
+        for key in ("batch_size", "lr", "pretrained"):
+            if key in prev_args and prev_args[key] != getattr(args, key):
+                logger.info(
+                    f"WARNING: resuming with {key}={getattr(args, key)} but the checkpoint "
+                    f"was written with {key}={prev_args[key]} - this run is not a "
+                    f"continuation of the same hyperparameters."
+                )
+        logger.info(
+            f"Resumed from {ckpt_path}: completed_epoch={ckpt['epoch']} "
+            f"val_loss={ckpt.get('val_loss')} -> starting at epoch {start_epoch}, "
+            f"best_val_loss so far={best_val_loss:.4f}"
+        )
+        if start_epoch > args.epochs:
+            raise SystemExit(
+                f"ERROR: checkpoint is already at epoch {ckpt['epoch']} but --epochs is "
+                f"{args.epochs}. --epochs is the final epoch number, so raise it above "
+                f"{ckpt['epoch']} to train further."
+            )
+
+    for epoch in range(start_epoch, args.epochs + 1):
         train_loss = run_epoch(model, train_loader, loss_fn, optimizer, device,
-                                logger, epoch, "train", max_batches=args.max_batches)
+                                logger, epoch, "train", max_batches=args.max_batches,
+                                log_every=args.log_every)
         val_loss = run_epoch(model, val_loader, loss_fn, None, device,
-                              logger, epoch, "val", max_batches=args.max_batches)
+                              logger, epoch, "val", max_batches=args.max_batches,
+                              log_every=args.log_every)
 
         history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
 
         # Save a checkpoint every epoch (so a Kaggle run can resume after an
         # interruption), plus track the best-val-loss checkpoint separately.
         epoch_ckpt_path = os.path.join(args.checkpoint_dir, f"epoch_{epoch}.pt")
-        torch.save({
+        checkpoint = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "train_loss": train_loss,
             "val_loss": val_loss,
             "args": vars(args),
-        }, epoch_ckpt_path)
+            # Carried so --resume-from restores the full loss curve and the
+            # best-val-loss watermark without depending on history.json.
+            "history": history,
+        }
+        torch.save(checkpoint, epoch_ckpt_path)
         logger.info(f"Saved checkpoint: {epoch_ckpt_path}")
+
+        # Rewrite history.json every epoch, not just at the end: a Kaggle
+        # session that times out mid-run would otherwise leave no loss curve.
+        save_history(args.checkpoint_dir, history)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_ckpt_path = os.path.join(args.checkpoint_dir, "best.pt")
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-                "args": vars(args),
-            }, best_ckpt_path)
+            torch.save(checkpoint, best_ckpt_path)
             logger.info(f"New best val_loss={val_loss:.4f} -> saved {best_ckpt_path}")
 
-    history_path = os.path.join(args.checkpoint_dir, "history.json")
-    with open(history_path, "w") as f:
-        json.dump(history, f, indent=2)
-    logger.info(f"Saved training history to {history_path}")
+    logger.info(f"Saved training history to {history_path(args.checkpoint_dir)}")
     logger.info("=== Training run end ===")
 
 
