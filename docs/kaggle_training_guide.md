@@ -217,24 +217,38 @@ already has a CUDA build of torch. `requirements.txt` pins the CPU-only
 wheel for the local Windows machine, and installing it would replace the GPU
 build.
 
-### B2. Put the images on local disk
+### B2. Find the images (unzip only if needed)
 
 ```python
-import glob, os, zipfile, pandas as pd
+import os, time, zipfile, pandas as pd
 
-META = glob.glob("/kaggle/input/**/metadata.csv", recursive=True)[0]
-IMG = "/tmp/images"
+def scan(top="/kaggle/input", max_depth=4):
+    """One pass over the inputs. Never goes deeper into a folder of images."""
+    meta, zips, imgdirs = [], [], []
+    for root, dirs, files in os.walk(top):
+        if "metadata.csv" in files: meta.append(os.path.join(root, "metadata.csv"))
+        if "images.zip" in files:   zips.append(os.path.join(root, "images.zip"))
+        n = sum(f.endswith(".jpg") for f in files)
+        if n > 70000: imgdirs.append(root)
+        if n > 1000 or root[len(top):].count(os.sep) >= max_depth:
+            dirs[:] = []
+    return meta, zips, imgdirs
 
-zips = glob.glob("/kaggle/input/**/images.zip", recursive=True)
-if zips:
-    with zipfile.ZipFile(zips[0]) as z:
-        z.extractall("/tmp")          # -> /tmp/images/*.jpg
-else:
-    # Kaggle extracted the zip on upload. Find the folder that holds the jpgs.
-    cands = [d for d in glob.glob("/kaggle/input/**/", recursive=True)
-             if len(glob.glob(os.path.join(d, "*.jpg"))) > 70000]
-    print(cands)
-    IMG = cands[0]
+t0 = time.time()
+meta, zips, imgdirs = scan()
+print(f"scan: {time.time()-t0:.0f}s\n meta={meta}\n zips={zips}\n imgdirs={imgdirs}")
+META = meta[0]
+
+if imgdirs:
+    # Kaggle already extracted the zip on import: read straight from the input, no copy needed
+    IMG = imgdirs[0]
+elif zips:
+    t = time.time()
+    if os.system(f"unzip -q -o '{zips[0]}' -d /tmp") != 0:
+        with zipfile.ZipFile(zips[0]) as z:
+            z.extractall("/tmp")
+    IMG = "/tmp/images"
+    print(f"unzip: {time.time()-t:.0f}s")
 
 ids  = set(pd.read_csv(META)["sample_id"].astype(str))
 have = {f[:-4] for f in os.listdir(IMG) if f.endswith(".jpg")}
@@ -245,8 +259,13 @@ man = os.path.join(IMG, "_preprocessing.json")
 print(open(man).read() if os.path.exists(man) else "no manifest found")
 ```
 
-**Check:** `missing` is in single digits. If `cands` lists more than one
-folder, you've attached the old dataset too. Detach it.
+**Check:** `missing` is in single digits. `scan` should take seconds and
+`unzip` (only if the dataset is still a zip) a few minutes. If `imgdirs`
+lists more than one folder, you've attached the old dataset too. Detach it.
+
+An earlier version of this cell used recursive `glob` three times. When
+Kaggle has already extracted the images, each of those searches walks all
+~73k files on the slow input mount, and the cell seems to hang.
 
 ### B3. Smoke test (5 batches)
 
