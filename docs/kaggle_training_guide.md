@@ -91,9 +91,9 @@ dataset.
 ### A1. Clone the code
 
 ```python
-!git clone -b feature/train-resume --depth 1 \
-    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git repo
-%cd repo
+!rm -rf /tmp/repo && git clone -b feature/train-resume --depth 1 \
+    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git /tmp/repo
+%cd /tmp/repo
 !pip install -q pillow requests pandas
 ```
 
@@ -206,9 +206,9 @@ assert torch.cuda.is_available(), "no GPU: fix Settings -> Accelerator before go
 ```
 
 ```python
-!git clone -b feature/train-resume --depth 1 \
-    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git repo
-%cd repo
+!rm -rf /tmp/repo && git clone -b feature/train-resume --depth 1 \
+    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git /tmp/repo
+%cd /tmp/repo
 !pip install -q "timm>=1.0.27"
 ```
 
