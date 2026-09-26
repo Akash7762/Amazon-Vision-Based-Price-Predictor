@@ -1,226 +1,414 @@
-# Kaggle Training Guide (full-scale GPU run)
+# Kaggle Training Guide — Phase 2 end to end
 
-Phase 2 built and locally sanity-tested the training pipeline on CPU. This
-guide covers the actual full-scale training run, which happens on Kaggle
-Notebooks.
+This covers all of Phase 2 on Kaggle, starting from a fresh notebook: download
+the images, train, and decide which checkpoint goes to Phase 3.
 
-**Nothing in this repo has trained a real model yet.** The only checkpoints
-produced locally came from a handful of batches on CPU to prove the pipeline
-executes; they are not a usable model. Following this guide is what produces
-one.
+**No real model has been trained yet.** The only checkpoints so far came from
+5-batch CPU sanity runs proving the code executes.
 
----
+It uses two notebooks:
 
-## Step 0 — Enable GPU and Internet on your Kaggle account
+| Notebook | Job | Accelerator | Output |
+|---|---|---|---|
+| **A — Download** | fetch and resize ~73.5k images | **None (CPU)** | `images.zip`, made into a Dataset |
+| **B — Train** | smoke test, then the real run | **GPU** | `best.pt`, `history.json`, logs |
 
-If **Settings → Accelerator** offers no GPU option, the cause is almost
-certainly that your account is not phone-verified. Kaggle gates both GPU/TPU
-accelerators *and* internet access behind phone verification.
+Downloading needs no GPU. Running it in a GPU session uses up your weekly GPU
+quota while the notebook waits on the network.
 
-**Confirm the diagnosis:** check the **Internet** toggle in the same panel.
-If Internet is also unavailable, it is phone verification — the two unlock
-together.
-
-**Fix:** kaggle.com/settings → Phone Verification → verify your number, then
-reopen/restart the notebook.
-
-This pipeline needs Internet regardless of the GPU, because it downloads
-images from `m.media-amazon.com`, pip-installs `timm`, and fetches pretrained
-weights from Hugging Face Hub.
-
-If you are already verified and still see no GPU, check: weekly GPU quota
-exhausted (roughly 30 hrs/week, resets weekly — verify the current figure in
-Kaggle's docs, these limits change); you are viewing someone else's notebook
-read-only rather than your own copy in edit mode; or the notebook is attached
-to a competition whose host disabled accelerators.
+**Rule for every step: don't start the next one until the check passes.** A
+wrong image path or a CPU-only session takes two minutes to catch early and
+hours to catch late.
 
 ---
 
-## Strategy: two notebooks, not one
+## Kaggle limitations this guide is built around
 
-| | Notebook A — Download | Notebook B — Train |
+These figures change. Check them against Kaggle's docs or your account page
+before relying on them.
+
+| Limit | Roughly | What it means here |
 |---|---|---|
-| Accelerator | **None (CPU)** | **GPU** |
-| Job | fetch + resize ~73.5k images | train the model |
-
-Downloading needs zero GPU. Running it inside a GPU session spends your
-limited weekly GPU quota on network waiting. Notebook A's output becomes a
-Kaggle Dataset that Notebook B attaches read-only, so you download **once**
-and can then train repeatedly — including after a crash, and again for Phase
-3 evaluation — without re-downloading.
-
-Download **all 73,517 rows** (train + val + test), not just the 51k train
-split. Phase 3 needs the test images, and one download job is cheaper than
-two.
-
----
-
-## Step 1 — Upload your inputs as Kaggle Datasets
-
-### metadata.csv
-
-Upload `data/processed/metadata.csv` (72 MB) at kaggle.com/datasets → New
-Dataset.
-
-**Do not regenerate it on Kaggle** from the raw `train.csv` via
-`data_cleaning.py` + `data_split.py`. Those use `train_test_split` under a
-specific scikit-learn version; regenerating under a different version risks
-producing a *different* train/val/test split. That would silently leak test
-rows into training and invalidate every Phase 3 metric. Upload the exact file
-the splits were made from.
-
-### Code
-
-- **Public repo:** `!git clone <your repo URL>` in a notebook cell. Easiest,
-  and stays in sync with future changes.
-- **Private repo:** upload `model/` and `scripts/` as a small Kaggle Dataset
-  instead. Avoids putting a GitHub token inside the notebook environment,
-  which is worth avoiding.
+| GPU quota | ~30 hrs/week, resets weekly | Download on CPU. Do smoke tests before long runs. |
+| Max session length | 12 hrs at time of writing | **Plan runs to finish in ≤ 9 hrs** for margin. Don't assume a run killed at the limit keeps its output. |
+| Interactive sessions | stop after inactivity; nothing saved unless you save a version | Do real work only with **Save & Run All (Commit)**. |
+| `/kaggle/working` | ~20 GB, **saved** as output | Only put what you want to keep here. |
+| `/tmp` | scratch disk, **not saved** | Put working files here. |
+| Output with tens of thousands of files | slow to save; turning it into a Dataset was unreliable on this project (Sep 14: the dialog showed 446 of 73k files) | **Zip the images into one file** before saving. |
+| `/kaggle/input` | read-only | Checkpoints go to `/kaggle/working`, never next to the inputs. |
+| Internet | needs a phone-verified account | Required for `git clone`, `pip`, pretrained weights, and image downloads. |
+| CPU cores | ~4 | `--num-workers 4`. Data loading may be the bottleneck, not the GPU. |
+| GPU choice | P100 or T4 ×2 | Both work. The script uses **one** GPU, so the second T4 sits idle. |
+| Committed runs | start from a **fresh** environment and run every cell top to bottom | Every cell must stand alone. Nothing from your interactive session carries over. |
 
 ---
 
-## Step 2 — Notebook A: download the images (CPU)
+## Step 0 — One-time setup
 
-New Notebook → Accelerator **None**, Internet **On**. Attach the metadata
-dataset and your code.
+### 0.1 Account
 
-```python
-!pip install -q pillow requests pandas
-!python scripts/download_images.py \
-    --metadata /kaggle/input/<your-metadata-dataset>/metadata.csv \
-    --out-dir /kaggle/working/images \
-    --image-size 224 --workers 32 --max-retries 3
+Open any notebook → **Settings → Accelerator**. No GPU option? Check the
+**Internet** toggle. If both are unavailable, verify your phone at
+kaggle.com/settings, then reopen the notebook.
+
+If you're verified and still don't see a GPU:
+- your weekly quota may be used up
+- you may be viewing someone else's notebook instead of your own editable copy
+- the notebook may be attached to a competition that disables accelerators
+
+**Check:** the GPU option appears, and Internet can be turned on.
+
+### 0.2 Code on GitHub
+
+The notebooks `git clone` the repo. `--resume-from` and `--log-every` only
+exist on `feature/train-resume` until that's merged, so clone that branch.
+It has to be **pushed** first:
+
+```bash
+git push -u origin feature/train-resume
 ```
 
-Run this with **Save Version → "Save & Run All (Commit)"**, not
-interactively. Interactive sessions shut down after a period of inactivity; a
-committed run continues in the background with your browser closed.
+### 0.3 metadata.csv as a Dataset
 
-Notes:
-- Images are **letterbox-padded** to 224x224 (aspect ratio preserved, padded
-  to square with white), not stretched. See `model/preprocessing.py`.
-  Phase 4 inference must import and apply that same function.
-- The script writes each JPEG to a temp file and atomically renames it, so an
-  interrupted run never leaves a truncated image. Just re-run to resume;
-  completed files are skipped.
-- A `_preprocessing.json` manifest is written into the output directory. If
-  you later re-run with different resize settings against that directory, the
-  script refuses rather than silently mixing incompatible images.
-- **Storage:** ~73.5k images at roughly 15 KB each is about 1.1 GB, well
-  under the 20 GB `/kaggle/working` cap.
-- **Timing:** locally this measured ~6 images/sec at 16 workers. Kaggle's
-  bandwidth is better but Amazon may rate-limit at 32 workers. Read the first
-  `progress: 1000/73517` line and extrapolate rather than trusting an
-  estimate.
-- **Check the failure count at the end.** Locally it was 0 out of 18,214. If
-  Kaggle reports thousands, that is rate-limiting rather than dead URLs —
-  re-run (it resumes) instead of accepting the loss.
+`metadata.csv` is gitignored, so it won't come with the clone. If you already
+have a Kaggle Dataset with it, reuse it. Otherwise upload
+`data/processed/metadata.csv` (72 MB) at kaggle.com/datasets → New Dataset.
 
-## Step 3 — Turn the images into a reusable Dataset
+**Don't regenerate it on Kaggle** from raw `train.csv`. The split comes from
+`train_test_split`, and a different scikit-learn version can produce a
+different split. That would leak test rows into training and make every
+Phase 3 number wrong without any error. Upload the exact file.
 
-When Notebook A finishes: open its **Output** tab → **New Dataset**. This is
-the step that makes everything downstream repeatable.
+**Check:** you can attach the metadata dataset to a notebook.
 
 ---
 
-## Step 4 — Notebook B: verify GPU, then smoke-test
+## Notebook A — Download the images (CPU)
 
-New Notebook → Accelerator **GPU**, Internet **On**. Attach the image
-dataset, the metadata dataset, and your code.
+New Notebook → Accelerator **None**, Internet **On**. Attach the metadata
+dataset.
+
+### A1. Clone the code
+
+```python
+!git clone -b feature/train-resume --depth 1 \
+    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git repo
+%cd repo
+!pip install -q pillow requests pandas
+```
+
+### A2. Find metadata.csv
+
+```python
+import glob
+hits = glob.glob("/kaggle/input/**/metadata.csv", recursive=True)
+print(hits)
+META = hits[0]
+```
+
+If more than one path prints, set `META` to the one you mean.
+
+### A3. Test with 1,000 rows
+
+```python
+%%time
+!python scripts/download_images.py --metadata {META} \
+    --out-dir /tmp/images_test --image-size 224 --workers 32 --limit 1000
+```
+
+(`%%time` has to be the first line of the cell, so put `META` in its own
+cell above.)
+
+**Check:** `Failed (after retries)` is close to 0. Work out the rate as
+1,000 ÷ the wall time, then how long 73,517 will take. It needs to finish
+well under 9 hours. If failures climb, lower `--workers` to 16: that's
+usually Amazon rate-limiting, not dead links.
+
+**Run A1–A3 interactively, then stop.** Don't run the full download
+interactively. The commit in A6 runs everything again from scratch, so you'd
+download twice.
+
+### A4. Full download, to `/tmp`
+
+```python
+!python scripts/download_images.py --metadata {META} \
+    --out-dir /tmp/images --image-size 224 --workers 32 --max-retries 3
+```
+
+This writes to `/tmp`, not `/kaggle/working`. 73k loose files in the output
+is what caused trouble last time. Only the zip from A5 goes into the output.
+
+This downloads **all 73,517 rows** (train, val and test). Phase 3 needs the
+test images, and one download is cheaper than two.
+
+What the script handles:
+- **Letterbox padding.** Images are padded to 224×224 with white borders, not
+  stretched (`model/preprocessing.py`). Phase 4 inference must use the same
+  function.
+- **Safe writes.** Each JPEG is written to a temp file and then renamed, so
+  there are never half-written images.
+- **A manifest.** `_preprocessing.json` records the settings.
+- **A failures file.** `_download_failures.csv` lists what failed.
+
+### A5. Verify, then zip
+
+```python
+import os, zipfile, pandas as pd
+
+ids  = set(pd.read_csv(META)["sample_id"].astype(str))
+have = {f[:-4] for f in os.listdir("/tmp/images") if f.endswith(".jpg")}
+print(f"metadata={len(ids)} images={len(have)} missing={len(ids - have)}")
+assert len(ids - have) < 100, "too many missing: rate-limited? re-run A4, it resumes"
+
+# ZIP_STORED: JPEGs are already compressed, so deflating them again only costs time
+with zipfile.ZipFile("/kaggle/working/images.zip", "w", zipfile.ZIP_STORED) as z:
+    for f in sorted(os.listdir("/tmp/images")):
+        z.write(os.path.join("/tmp/images", f), arcname=f"images/{f}")
+
+with zipfile.ZipFile("/kaggle/working/images.zip") as z:
+    n = sum(1 for x in z.namelist() if x.endswith(".jpg"))
+print(f"zip holds {n} jpgs, {os.path.getsize('/kaggle/working/images.zip')/1e9:.2f} GB")
+```
+
+**Check:** `missing` is in single digits (on Sep 14, 1 of 73,517 failed for
+good), and the zip holds the same number of JPEGs. The `assert` makes the
+committed run fail loudly instead of saving a partial dataset.
+
+### A6. Commit
+
+**Save Version → Save & Run All (Commit).** You can close the browser. Watch
+progress from the notebook's **Versions** list.
+
+When it finishes, open that version → **Output**. You should see a single
+`images.zip` of about 1 GB. Click **New Dataset** and name it something
+distinct, like `amazon-price-images-v2`, so it can't be confused with the old
+dataset that has duplicate folders.
+
+**Check:** the new Dataset exists. Kaggle may keep it as `images.zip` or
+extract it into an `images/` folder. Step B2 handles both.
+
+---
+
+## Notebook B — Train (GPU)
+
+New Notebook → Accelerator **GPU** (P100 or T4), Internet **On**. Attach
+`amazon-price-images-v2` and the metadata dataset.
+
+Every cell below must work in a fresh session, because the commit runs them
+all from the top.
+
+### B1. GPU check, then code
 
 ```python
 import torch
 print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))
+assert torch.cuda.is_available(), "no GPU: fix Settings -> Accelerator before going further"
 ```
 
-If `cuda.is_available()` is `False`, **stop** and fix the accelerator setting.
-Do not proceed — you would be training on CPU and burning hours for nothing.
-
 ```python
+!git clone -b feature/train-resume --depth 1 \
+    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git repo
+%cd repo
 !pip install -q "timm>=1.0.27"
 ```
 
-**Do not** `pip install torch==2.14.0`. Kaggle's image already ships a
-CUDA-enabled torch; installing the PyPI wheel replaces it with the CPU-only
-build. (`requirements.txt` pins the CPU wheel because that is what the local
-Windows dev machine has — it is not the right pin for Kaggle.)
+**Don't** `pip install torch` or `pip install -r requirements.txt`. Kaggle
+already has a CUDA build of torch. `requirements.txt` pins the CPU-only
+wheel for the local Windows machine, and installing it would replace the GPU
+build.
 
-Then a deliberate smoke test, to catch path and permission errors in two
-minutes rather than two hours:
+### B2. Put the images on local disk
 
 ```python
-!python model/train.py --subset-mode full \
-    --metadata /kaggle/input/<metadata-dataset>/metadata.csv \
-    --image-dir /kaggle/input/<images-dataset>/images \
-    --epochs 1 --max-batches 5 --batch-size 64 \
-    --checkpoint-dir /kaggle/working/checkpoints \
-    --log-path /kaggle/working/logs/smoke.log
+import glob, os, zipfile, pandas as pd
+
+META = glob.glob("/kaggle/input/**/metadata.csv", recursive=True)[0]
+IMG = "/tmp/images"
+
+zips = glob.glob("/kaggle/input/**/images.zip", recursive=True)
+if zips:
+    with zipfile.ZipFile(zips[0]) as z:
+        z.extractall("/tmp")          # -> /tmp/images/*.jpg
+else:
+    # Kaggle extracted the zip on upload. Find the folder that holds the jpgs.
+    cands = [d for d in glob.glob("/kaggle/input/**/", recursive=True)
+             if len(glob.glob(os.path.join(d, "*.jpg"))) > 70000]
+    print(cands)
+    IMG = cands[0]
+
+ids  = set(pd.read_csv(META)["sample_id"].astype(str))
+have = {f[:-4] for f in os.listdir(IMG) if f.endswith(".jpg")}
+print(f"META={META}\nIMG={IMG}\nimages={len(have)} missing={len(ids - have)}")
+assert len(ids - have) < 100
 ```
 
-`--metadata` and `--image-dir` are **required on Kaggle**. Without them the
-script falls back to the repo-relative defaults (`data/processed/...`), which
-do not exist there. It fails fast with an explicit message rather than a
-stack trace if a path is wrong.
+**Check:** `missing` is in single digits. If `cands` lists more than one
+folder, you've attached the old dataset too. Detach it.
 
-## Step 5 — The real run
+### B3. Smoke test (5 batches)
 
 ```python
-!python model/train.py --subset-mode full \
-    --metadata /kaggle/input/<metadata-dataset>/metadata.csv \
-    --image-dir /kaggle/input/<images-dataset>/images \
+!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
+    --epochs 1 --max-batches 5 --batch-size 64 --num-workers 4 \
+    --checkpoint-dir /tmp/smoke --log-path /tmp/smoke/smoke.log
+```
+
+**Check** these lines in the output:
+- `device=cuda cuda_available=True`
+- `split='train': ... usable rows` around 51k, and `split='val'` around 11k.
+  `0 usable rows` means `IMG` is wrong.
+- a finite `avg_loss`
+
+The smoke test writes to `/tmp`, so it doesn't clutter the saved output.
+
+### B4. Measure before choosing `--epochs`
+
+Run this interactively. It does a 100-batch slice and times it:
+
+```python
+!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
+    --epochs 1 --max-batches 100 --batch-size 64 --num-workers 4 \
+    --checkpoint-dir /tmp/timing --log-path /tmp/timing/t.log --log-every 0
+```
+
+Read `elapsed_sec` from the `split=train DONE` line. Then:
+
+```
+seconds per epoch  ≈ (train elapsed / 100) × (51,000 / 64)  +  a full val pass
+epochs that fit    ≈ (9 hrs × 3600) / seconds per epoch
+```
+
+If 15 epochs fit, use 15. If not, use what fits and continue in a second
+session with step B7. A committed run that hits the session limit is the one
+really expensive mistake in this workflow.
+
+Also look at GPU use during the timing run (`!nvidia-smi` in another cell).
+If it's low, the 4 CPUs decoding and augmenting JPEGs are the bottleneck.
+That's normal on Kaggle. It means a faster GPU wouldn't help, not that
+something is broken.
+
+### B5. The real run
+
+```python
+!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
     --epochs 15 --batch-size 64 --lr 1e-4 --num-workers 4 \
     --checkpoint-dir /kaggle/working/checkpoints \
     --log-path /kaggle/working/logs/train.log
 ```
 
-Again via **Save & Run All**.
+Set `--epochs` to what B4 said fits. Then **delete or comment out the B4
+cell**, since the commit would run it again for nothing. Then **Save Version
+→ Save & Run All (Commit)**.
 
-- **Time it honestly.** Let epoch 1 finish, read `elapsed_sec` from the log,
-  multiply by 15. If that exceeds the session limit (~9 hrs on GPU as of
-  writing — verify current limits), reduce epochs and continue from the last
-  checkpoint instead of losing the session.
-- `--epochs 15`, `--batch-size 64`, `--lr 1e-4` are **starting points, not
-  tuned values.** Nothing has validated them. Watch the val loss: still
-  falling at epoch 15 means train longer; bottomed out at epoch 5 and rising
-  means overfitting, and `best.pt` already holds the best epoch.
-- A checkpoint is saved every epoch plus a `best.pt` tracking lowest val
-  loss. Note there is still **no `--resume-from` flag** — resuming after a
-  session timeout means loading `model_state_dict` / `optimizer_state_dict`
-  from a checkpoint manually in a notebook cell.
+What the script does during the run:
+- saves `epoch_N.pt` every epoch, plus `best.pt` for the lowest val loss
+- rewrites `history.json` after every epoch, so a crash still leaves a loss
+  curve
+- logs batch loss every 50 batches (`--log-every`), so the output stays
+  readable
 
-## Step 6 — Get your results out
+`--epochs 15 --batch-size 64 --lr 1e-4` are **starting points, not tuned
+values**. Step B9 is where you judge them.
 
-Before the session ends, download from the Output tab:
+### B6. Trim the output and plot the curve
 
-- `checkpoints/best.pt` — the trained model, the actual deliverable
-- `logs/train.log` and `checkpoints/history.json` — your loss curves, needed
-  for your report and viva
+Add this as the last cell, so it runs inside the commit:
 
-Also save `/kaggle/working` as a Dataset so Phase 3 can attach it directly
-rather than re-uploading a ~330 MB checkpoint.
+```python
+import json, os, glob, re
+import matplotlib.pyplot as plt
+
+ck = "/kaggle/working/checkpoints"
+h = json.load(open(f"{ck}/history.json"))
+
+# Each checkpoint is roughly 330 MB (weights + AdamW state). Keep best + last only.
+epochs = sorted(int(re.search(r"epoch_(\d+)", p).group(1)) for p in glob.glob(f"{ck}/epoch_*.pt"))
+for e in epochs[:-1]:
+    os.remove(f"{ck}/epoch_{e}.pt")
+
+plt.plot([r["epoch"] for r in h], [r["train_loss"] for r in h], label="train")
+plt.plot([r["epoch"] for r in h], [r["val_loss"] for r in h], label="val")
+plt.xlabel("epoch"); plt.ylabel("SmoothL1 loss"); plt.legend(); plt.grid(alpha=.3)
+plt.savefig("/kaggle/working/loss_curve.png", dpi=150, bbox_inches="tight")
+print(json.dumps(h, indent=1))
+```
+
+The newest `epoch_N.pt` is kept so B7 can resume from it.
+
+**Check:** the committed version's Output has `checkpoints/best.pt`,
+`checkpoints/epoch_<last>.pt`, `checkpoints/history.json`,
+`logs/train.log` and `loss_curve.png`.
+
+### B7. If you need more epochs, resume
+
+Make the finished run's output into a Dataset (Output → New Dataset, e.g.
+`amazon-price-run1`). Make a copy of Notebook B, attach that dataset, and
+swap the B5 cell for:
+
+```python
+PREV = glob.glob("/kaggle/input/amazon-price-run1/**/checkpoints", recursive=True)[0]
+!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
+    --epochs 15 --batch-size 64 --lr 1e-4 --num-workers 4 \
+    --resume-from {PREV}/epoch_7.pt \
+    --checkpoint-dir /kaggle/working/checkpoints \
+    --log-path /kaggle/working/logs/train.log
+```
+
+- `--epochs` is the **final epoch number**, not how many more to run. From
+  epoch 7 with `--epochs 15`, it runs 8–15. The script refuses to start if
+  the checkpoint is already past `--epochs`.
+- It restores the weights, optimizer state, loss history and best-val-loss,
+  so `best.pt` still means best across both sessions.
+- Keep `--batch-size`, `--lr` and pretrained the same. The script warns if
+  they differ, because it's no longer one experiment.
+- It does **not** restore the shuffle order or RNG state. Mention that in
+  the report rather than claiming the run continued exactly.
+
+### B8. Save the results
+
+From the final version's Output, download `checkpoints/best.pt`,
+`checkpoints/history.json`, `logs/train.log` and `loss_curve.png`. The last
+three are what your report and viva use. Also make the output a Dataset, so
+Phase 3 can attach `best.pt` without re-uploading it.
+
+**Check:** `best.pt` is on your machine **and** in a Kaggle Dataset.
+
+### B9. Read the curve and decide
+
+This is roadmap Phase 2, step 4.
+
+| What you see | What it means | What to do next |
+|---|---|---|
+| val loss still falling at the last epoch | undertrained | more epochs via B7 |
+| val loss bottoms out, then rises | overfitting | `best.pt` already holds the best epoch. Try stronger augmentation or fewer epochs. |
+| val loss flat from epoch 1 | not learning | check `--lr`. Re-read the B3 output. |
+| train loss far below val loss, and both flat | memorising | more augmentation or regularisation |
+
+For tuning, change **one** thing per run and keep each run's
+`history.json` as its own Dataset, so comparisons are real. Your weekly GPU
+quota limits how many runs you can do, so use them on what the curve points
+to.
+
+**Phase 2 is done when** you can say, from the curve, why the checkpoint you
+kept is the one you kept. That's where Phase 3 starts, and it's a likely
+viva question.
 
 ---
 
-## Note on the local dev image cache
+## Known gaps
 
-`data/processed/images/dev` was downloaded **before** letterbox-padding was
-introduced, so those 18,214 images are stretched and inconsistent with
-current code. The downloader will refuse to add to that directory. To refresh
-it for local work:
+- No evaluation on the held-out `test` split yet. That's Phase 3. Don't
+  look at test metrics while tuning in B9.
+- No `kaggle kernels push` automation. Kaggle API credentials were never set
+  up, so this is the manual notebook route.
+- The hyperparameters are unvalidated defaults. No search has been run.
+- The local `data/processed/images/dev` cache was downloaded before
+  letterbox padding existed, so those images are stretched. That only
+  matters for local sanity runs. To refresh it:
 
-```bash
-python scripts/download_images.py \
-    --metadata data/processed/dev_subset.csv \
-    --out-dir data/processed/images/dev \
-    --image-size 224 --workers 16 --overwrite
-```
-
-This only matters for local sanity checks; the Kaggle run downloads fresh
-images with the correct preprocessing either way.
-
-## What is still not done
-
-- No real training run has happened yet — this guide is how you do it.
-- No evaluation against the held-out `test` split (Phase 3).
-- No `kaggle kernels push` automation; Kaggle API credentials were never
-  configured, so this is the manual notebook route.
+  ```bash
+  python scripts/download_images.py \
+      --metadata data/processed/dev_subset.csv \
+      --out-dir data/processed/images/dev \
+      --image-size 224 --workers 16 --overwrite
+  ```
