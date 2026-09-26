@@ -1,2 +1,16 @@
 # Amazon Vision-Based Price Prediction System
-# Phase 0: Initial dependencies (currently empty)
+# Phase 0: Initial dependencies
+# Phase 2: Model design & training dependencies added below.
+# NOTE: torch here resolves to the CPU-only build on this local machine
+# (no local GPU). On Kaggle, the standard GPU-enabled torch wheel that
+# ships with the Kaggle Notebook image should be used instead.
+
+pandas==3.0.5
+numpy==2.5.3
+scikit-learn==1.9.0
+requests==2.34.2
+pillow==12.3.0
+
+torch==2.14.0
+torchvision==0.29.0
+timm==1.0.29
