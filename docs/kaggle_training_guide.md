@@ -3,15 +3,16 @@
 This covers all of Phase 2 on Kaggle, starting from a fresh notebook: download
 the images, train, and decide which checkpoint goes to Phase 3.
 
-**No real model has been trained yet.** The only checkpoints so far came from
-5-batch CPU sanity runs proving the code executes.
+The first real model, run1, was trained on Oct 1 (val MAE well below the
+median-price baseline). Results for every run are in
+[`experiments.md`](experiments.md).
 
 It uses two notebooks:
 
 | Notebook | Job | Accelerator | Output |
 |---|---|---|---|
 | **A — Download** | fetch and resize ~73.5k images | **None (CPU)** | `images.zip`, made into a Dataset |
-| **B — Train** | smoke test, then the real run | **GPU** | `best.pt`, `history.json`, logs |
+| **B — Train** | train one run, score it on val, compare with an earlier run | **GPU** | `best.pt`, `history.json`, `eval/` metrics |
 
 Downloading needs no GPU. Running it in a GPU session uses up your weekly GPU
 quota while the notebook waits on the network.
@@ -192,29 +193,45 @@ extract it into an `images/` folder. On Sep 26 it extracted it, under
 
 ---
 
-## Notebook B — Train (GPU)
+## Notebook B — Train and compare (GPU)
 
-The cells live in [`notebooks/kaggle_train.ipynb`](../notebooks/kaggle_train.ipynb).
-Import that file into Kaggle rather than retyping it.
+The cells live in [`notebooks/kaggle_train.ipynb`](../notebooks/kaggle_train.ipynb),
+one notebook for every run: **Cell 0 holds the run's settings and is the only
+cell you edit.** Import the file into Kaggle rather than retyping it. (run1
+used an earlier 6-cell version, still in git history at `fd359e4`.)
 
-What the cells do differently from a plain `!python ...` notebook, and why:
+| Cell | What it does | Time on a T4 |
+|---|---|---|
+| 0 | settings: run name, target, epochs, which earlier run to compare with | — |
+| 1 | checks the GPU really works (runs a convolution) | seconds |
+| 2 | clones the code, refuses to go on if GitHub has old code, installs timm | ~1 min |
+| 3 | fixed data paths, image check, finds the earlier run's `best.pt` | ~1 min |
+| 4 | scores the earlier run on val with `model/evaluate.py` | ~2 min |
+| 5 | smoke test: 5 batches with this run's settings | ~2 min |
+| 6 | the training run | ~15 min per epoch |
+| 7 | scores this run's `best.pt` on val, then compares the two | ~2 min |
+| 8 | summary, loss and dollar-error plots, trims old checkpoints | seconds |
 
-- **Every shell command goes through a `run()` helper** that prints output
-  live and **raises if the command fails**. A plain `!command` ignores
-  failures, so a broken smoke test would still roll on into the 4-hour run.
+Why the cells look the way they do:
+
+- **Every shell command goes through `run()`**, which shows output live and
+  **raises if the command fails**. A plain `!command` ignores failures, so a
+  broken smoke test would still roll on into the long run. Paths are quoted
+  with `q()`.
 - **`python -u`** so training lines reach the log as they happen.
-- **`--max-hours 8`** on the real run. Before each epoch the script checks
-  whether another epoch still fits; if not, it stops cleanly, so the run
-  finishes and saves its output instead of being killed at the session
-  limit.
+- **`--max-hours 8`**: before each epoch the script checks another epoch
+  still fits; if not it stops cleanly, so the run finishes and saves its
+  output instead of being killed at the session limit.
 - **Checkpoints are written to a temp file and renamed**, so a session dying
   mid-save can't corrupt `best.pt`.
-- **Cell 1 runs a real convolution on the GPU**, so a card this torch build
-  can't drive (e.g. P100) fails in seconds.
-- **Cell 2 refuses to continue if GitHub has old code** (it checks for
-  `--max-hours` in `train.py`). Push before you start.
-- **Cell 3 uses fixed paths** and only falls back to a shallow search that
-  never lists the 73k-image folder.
+- **`--select-by val_mae`**: `best.pt` is the epoch with the lowest val
+  error *in dollars*. The loss can't be compared across targets (with
+  `--target log` it's in log-dollars), and the epoch with the lowest loss
+  isn't always the one with the lowest dollar error.
+- **Cell 4 scores the earlier run before training**, with the same script
+  and the same images as Cell 7. That makes the comparison like-for-like,
+  and if anything is wrong with the evaluation it shows up in minute 5, not
+  after the long run.
 
 ### B0. Before you start
 
@@ -222,84 +239,106 @@ What the cells do differently from a plain `!python ...` notebook, and why:
 2. On Kaggle: **View Active Events** (bottom left of any editor) → stop
    everything that's running. An open GPU session is the usual reason a saved
    run sits in **Queued**.
-3. Note your GPU hours left (right panel → Session options in any
-   notebook). One full run uses about 4.
+3. Check your GPU hours left (right panel → Session options). A 6-epoch run
+   uses about 1¾ hours, a 15-epoch run about 4.
 
 ### B1. Create the notebook
 
-1. **Create → New Notebook.** Then **File → Import Notebook** and upload
-   `notebooks/kaggle_train.ipynb` (or paste the six cells by hand).
+1. **Create → New Notebook** → **File → Import Notebook** → upload
+   `notebooks/kaggle_train.ipynb`.
 2. Right panel → **Session options**: Accelerator **GPU T4 x2**, Internet
    **On**.
-3. **Add Input**: `amazon-price-metadata` and `amazon-price-images-v2`. Only
-   those two.
+3. **Add Input**, three of them:
+   - `amazon-price-metadata`
+   - `amazon-price-images-v2`
+   - the earlier run's output, e.g. `amazon-price-run1`. Attach it either as
+     the Dataset you made from its output, or straight from **Add Input →
+     Notebooks → Your Work**. Not both, or Cell 3 finds two `best.pt` files
+     and stops.
 
-### B2. Rehearse Cells 1–4 interactively
+### B2. Set Cell 0
 
-Run Cells 1–4 with Shift + Enter. **Don't run Cells 5 or 6.**
+For run2 it already reads:
+
+```python
+RUN_NAME = "run2"
+TARGET = "log"
+EPOCHS = 6
+COMPARE_WITH = "auto"
+COMPARE_NAME = "run1"
+```
+
+For a later run, change the name and the one thing being tested. If you
+don't want a comparison, set `COMPARE_WITH = None` and skip the third input.
+
+### B3. Rehearse Cells 0–5 interactively
+
+Shift + Enter through Cells 0–5. **Don't run 6, 7 or 8.**
 
 | Cell | Good output |
 |---|---|
+| 0 | `run2: target=log, epochs=6, compare with run1 (auto)` |
 | 1 | `GPU: Tesla T4` and `GPU works, test output shape: (8, 16, 222, 222)` |
 | 2 | a commit line, `code is up to date`, then `torch ... \| timm ... \| cuda OK`. Red pip "dependency resolver" warnings above it are harmless. |
-| 3 | `images=73517 missing=0` and the manifest with `"resize_mode": "letterbox_pad"` (the listing takes ~1 min) |
-| 4 | `device=cuda`, 51461 train / 11028 val usable rows, a finite `avg_loss`, `=== Training run end ===` |
+| 3 | `images=73517 missing=0`, the manifest with `"resize_mode": "letterbox_pad"`, and exactly one `earlier-run checkpoints found:` path ending in `checkpoints/best.pt` |
+| 4 | `=== run1 on val: 11028 images, epoch 14, target=price ...` and two tables. Its MAE is run1's real val error in dollars. |
+| 5 | `target=log`, 51461 train / 11028 val usable rows, `avg_loss=... mae=$...`, `=== Training run end ===` |
 
-### B3. Stop the session, then save the version
+### B4. Stop the session, then save the version
 
 1. **Stop the interactive session first** (power icon / Stop session), and
-   check View Active Events shows nothing running. If it's left open, it
-   uses GPU hours and can hold the saved run in the queue.
-2. **Save Version** → name `run1 - convnext_tiny lr1e-4 bs64 e15` →
+   check View Active Events shows nothing running.
+2. **Save Version** → name it after the run (e.g. `run2 - log price e6`) →
    **Save & Run All (Commit)** → Advanced: always save output → **Save**.
    If Save Version is greyed out without a session, start one, save, and
    stop it straight away.
 3. Close the editor tab. **Opening the editor again can start a new
-   session.** Follow progress from the notebook's page (Your Work → Code)
-   instead.
+   session.** Follow progress from the notebook's page (Your Work → Code).
 
-### B4. While it runs
+### B5. While it runs
 
-- **Queued** is normal. No GPU hours are used. If it's still queued after an
-  hour, check View Active Events for a session you forgot.
-- **Running**: Cells 1–4 take ~5–8 min. Then a `batch=` line roughly every
-  minute, and an epoch summary every ~15 min (measured Sep 26: ~900 s per
-  epoch). 15 epochs ≈ 3.8 hours.
-- At the end the log shows `best_epoch=… best_val_loss=…` and Cell 6 prints
-  the summary against the median baseline (14.03).
+- **Queued** is normal and uses no GPU hours. Still queued after an hour?
+  Check View Active Events for a session you forgot.
+- **Running**: Cells 0–5 take ~8–10 min. Then a `batch=` line roughly every
+  minute and an epoch summary every ~15 min, now with `mae=$...` on each
+  `DONE` line. 6 epochs ≈ 1.5 h, plus ~5 min for Cells 7–8.
 
-### B5. When it finishes
+### B6. When it finishes
 
-Output should hold `checkpoints/best.pt` and `checkpoints/epoch_<last>.pt`
-(~334 MB each), `checkpoints/history.json`, `logs/train.log` and
-`loss_curve.png`.
+Output holds `checkpoints/best.pt` and `checkpoints/epoch_<last>.pt`
+(~334 MB each), `checkpoints/history.json`, `logs/train.log`,
+`loss_curve.png`, and `eval/` with each run's metrics (`*_val.json`),
+per-image predictions (`*_val_predictions.csv`, worst first) and
+`comparison_val.md`.
 
-1. Download `best.pt`, `history.json`, `train.log`, `loss_curve.png` into
-   `model/checkpoints/` and `model/logs/` locally (both gitignored).
-2. Output → **New Dataset** → `amazon-price-run1`, so Phase 3 and any resume
-   can attach it.
+1. Download `history.json`, `train.log`, `loss_curve.png` and the `eval/`
+   folder. `best.pt` too if this run turns out to be the keeper.
+2. Output → **New Dataset** → e.g. `amazon-price-run2`, so later runs and
+   Phase 3 can attach it.
 
-### B6. Only if Cell 6 says "Stopped early by the time budget"
+### B7. Only if Cell 8 says "Stopped early by the time budget"
 
-Open the notebook, attach `amazon-price-run1` as a third input, and replace
-Cell 5 with this (change `epoch_9.pt` to the file Cell 6 named):
+Make the stopped run's output a Dataset (e.g. `amazon-price-run2`), attach
+it, and in Cell 0 set `COMPARE_WITH` to run1's exact path instead of
+`"auto"` (with two runs attached, auto finds two). Then replace Cell 6 with
+this, changing `epoch_3.pt` to the file Cell 8 named:
 
 ```python
-# Cell 5 (resume) - carries on to epoch 15 from the last saved epoch
-EPOCHS = 15
-PREV = "/kaggle/input/datasets/akashverma7762/amazon-price-run1/checkpoints"
+# Cell 6 (resume) - continues to EPOCHS from the last saved epoch
+PREV = "/kaggle/input/datasets/akashverma7762/amazon-price-run2/checkpoints"
 print(sorted(os.listdir(PREV)))
-run(f"python -u model/train.py --subset-mode full --metadata {META} --image-dir {IMG} "
-    f"--epochs {EPOCHS} --batch-size 64 --lr 1e-4 --num-workers 4 --max-hours 8 "
-    f"--resume-from {PREV}/epoch_9.pt "
+run(f"python -u model/train.py --subset-mode full --metadata {q(META)} --image-dir {q(IMG)} "
+    f"--target {TARGET} --select-by val_mae --epochs {EPOCHS} --batch-size 64 --lr 1e-4 "
+    f"--num-workers 4 --max-hours 8 --resume-from {q(PREV + '/epoch_3.pt')} "
     f"--checkpoint-dir /kaggle/working/checkpoints --log-path /kaggle/working/logs/train.log")
 ```
 
-`--epochs` is the final epoch number, not how many more. Weights, optimizer
-state, loss history and the best-val-loss are restored; shuffle order and
-RNG state are not, so say so in the report. Then repeat B3–B5.
+`--epochs` is the final epoch number, not how many more. The target must
+match the checkpoint (the script refuses otherwise). Weights, optimizer
+state, history and the best-so-far score are restored; shuffle order and RNG
+state are not, so say so in the report. Then repeat B4–B6.
 
-### B7. Troubleshooting
+### B8. Troubleshooting
 
 | Error | Cause | Fix |
 |---|---|---|
@@ -307,48 +346,53 @@ RNG state are not, so say so in the report. Then repeat B3–B5.
 | Cell 1 `no kernel image is available` | P100 selected | switch to GPU T4 x2 |
 | Cell 2 `Could not resolve host: github.com` | Internet off | Session options → Internet On |
 | Cell 2 `OLD CODE on GitHub` | branch not pushed | `git push` on your PC, rerun Cell 2 |
-| Cell 3 `Attach exactly two inputs` | wrong / extra datasets | attach only metadata + images-v2 |
-| Cell 4/5 `CUDA out of memory` | unexpected at batch 64 on a T4 (the smoke test passed) | tell me before changing batch size, it changes the experiment |
-| Cell 4/5 `DataLoader worker ... killed` / `bus error` | shared-memory limits | change `--num-workers 4` to `2` |
+| Cell 3 `Attach exactly one metadata and one images dataset` | wrong / extra datasets | attach only metadata + images-v2 (+ the earlier run) |
+| Cell 3 `Expected exactly one attached earlier run` | earlier run not attached, or attached twice | attach it once, or set `COMPARE_WITH` to a path / `None` |
+| `CUDA out of memory` | unexpected at batch 64 on a T4 | tell me before changing batch size, it changes the experiment |
+| `DataLoader worker ... killed` / `bus error` | shared-memory limits | `--num-workers 4` → `2` in Cells 5 and 6 |
 | HF `unauthenticated requests` warning | no Hugging Face token | harmless |
 
-### B8. Read the curve and decide
+### B9. Read the results and decide
 
-This is roadmap Phase 2, step 4.
+This is roadmap Phase 2, step 4. Record every run in
+[`experiments.md`](experiments.md), including the ones that lose.
 
-**First, the bar to beat.** Always predicting the median train price
-($14.00) scores **val SmoothL1 = 14.03** (MAE $14.52). The model has to get
-clearly below that to have learned anything from the images. The 100-batch
-timing run on Sep 26 already reached 12.86 on part of the val set.
+**The bar to beat** is always predicting the median train price ($14.00):
+val MAE **$14.52**, val SmoothL1 14.03.
 
-Reading the loss: with `beta=1`, SmoothL1 is roughly MAE − 0.5 once errors
-are above $1, so a val loss of 10 means predictions are typically about
-$10.50 off.
+**Compare runs on val MAE in dollars**, from Cell 7's comparison: same
+script, same 11,028 images. The table under it gives the paired-bootstrap
+95% interval for the difference. If the interval includes 0, the runs
+aren't distinguishable on this val set. That interval covers which images
+landed in val; it does **not** cover training randomness (seed, shuffle
+order), so a small gap is weak evidence even when the interval excludes 0.
+
+Reading a curve:
 
 | What you see | What it means | What to do next |
 |---|---|---|
-| val loss still falling at the last epoch | undertrained | more epochs via B6 |
-| val loss bottoms out, then rises | overfitting | `best.pt` already holds the best epoch. Try stronger augmentation or fewer epochs. |
-| val loss flat from epoch 1 | not learning | check `--lr`; re-read the Cell 4 output |
-| train loss far below val loss, both flat | memorising | more augmentation or regularisation |
+| val still improving at the last epoch | undertrained | more epochs via B7 |
+| val bottoms out, then rises | overfitting | `best.pt` already holds the best epoch |
+| val flat from epoch 1 | not learning | check `--lr`; re-read the Cell 5 output |
+| val flat while train keeps falling (run1) | memorising | regularisation / augmentation, not more epochs |
 
-For tuning, change **one** thing per run and keep each run's
-`history.json` as its own Dataset. Your weekly GPU hours cap how many runs
-you get, so spend them where the curve points.
+Change **one** thing per run. Your weekly GPU hours cap how many runs you
+get, so spend them where the curve points.
 
-**Phase 2 is done when** you can say, from the curve, why the checkpoint you
-kept is the one you kept. That's where Phase 3 starts, and it's a likely
-viva question.
+**Phase 2 is done when** you can say why the checkpoint you kept is the one
+you kept, from numbers you'd defend in the viva. Then Phase 3 scores it once
+on the test split.
 
 ---
 
 ## Known gaps
 
 - No evaluation on the held-out `test` split yet. That's Phase 3. Don't
-  look at test metrics while tuning in B8.
+  look at test metrics while tuning in B9.
 - No `kaggle kernels push` automation. Kaggle API credentials were never set
   up, so this is the manual notebook route.
-- The hyperparameters are unvalidated defaults. No search has been run.
+- Tuning so far is one change at a time (run2: log-price target); no
+  systematic hyperparameter search.
 - The local `data/processed/images/dev` cache was downloaded before
   letterbox padding existed, so those images are stretched. That only
   matters for local sanity runs. To refresh it:

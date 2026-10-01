@@ -3,12 +3,15 @@
 One row per training run. Val numbers only — the test split is not touched
 until Phase 3.
 
-**Baseline to beat:** always predicting the median train price ($14.00)
-gives val SmoothL1 **14.03** (val MAE $14.52).
+Runs are compared on **val MAE in dollars**, scored by `model/evaluate.py`
+on the same 11,028 val images. The loss can't be compared across runs once
+the target changes (run2's loss is in log-dollars).
 
-| Run | Date | Change from previous | Epochs | Best val loss (epoch) | vs baseline | Notes |
-|---|---|---|---|---|---|---|
-| run1 | 2026-10-01 | — (first full run) | 15 | **10.755** (14) | −3.28 (−23%) | plateaued by epoch ~4, train kept falling |
+| Run | Date | Change from previous | Epochs | best.pt | Val MAE ($) | Val loss | Notes |
+|---|---|---|---|---|---|---|---|
+| median price | — | always predict $14.00 | — | — | **14.52** | 14.03 | the bar to beat |
+| run1 | 2026-10-01 | — (first full run) | 15 | epoch 14, by val loss | pending: scored in run2's notebook | 10.755 | plateaued by epoch ~4, train kept falling |
+| run2 | — | target = log(price) | 6 | by val MAE | pending | log space | planned, see below |
 
 ---
 
@@ -60,3 +63,45 @@ too large for git.
 near-identical items can differ a lot in price (brand, pack size, quantity).
 Some of the remaining error is a ceiling of image-only prediction, not just
 the model.
+
+---
+
+## run2 — log-price target (planned)
+
+**The one change from run1:** the head predicts log(price) instead of price
+(`--target log`, see [`model/targets.py`](../model/targets.py)); dollars are
+exp(output). Same backbone, loss function (SmoothL1, beta=1, now on
+log-price), optimizer, learning rate, batch size, augmentation and data.
+
+On the log scale an error is a ratio: guessing $4 for a $2 item and $100 for
+a $50 item are both "2× too high" and cost the same. On run1's raw scale the
+second is a 25 times bigger error ($50 vs $2), so the loss is dominated by
+expensive items.
+
+**Two other differences, neither of which favours run2:**
+
+- **6 epochs instead of 15.** run1's val error stopped improving by about
+  epoch 4, so epochs 7–15 bought nothing. If anything, fewer epochs make
+  this a harder test for run2.
+- **best.pt is picked by val MAE in dollars** (`--select-by val_mae`) instead
+  of val loss. For run1 those are nearly the same thing (SmoothL1 in dollars
+  is about MAE − 0.5); for a log-target run they aren't, and dollars is what
+  the runs are compared on.
+
+**Decision rule, written down before the run:**
+
+- Deciding number: val MAE in dollars of each run's `best.pt`, both scored
+  by `model/evaluate.py` on the same 11,028 val images (notebook Cells 4
+  and 7).
+- run2 replaces run1 only if its val MAE is lower **and** the paired
+  bootstrap 95% interval for the difference excludes 0. Otherwise run1
+  stays.
+- SMAPE, RMSE, bias and the per-price-range table are reported alongside
+  but don't decide.
+- Either way, the result goes in this file.
+
+**Expectation going in (not a result):** log-price should help cheap items
+and relative error (SMAPE) most. Dollar MAE could go either way, since
+expensive items dominate it. A log model also tends to guess low on
+average (bias below 0), because exp of an average log is below the average
+price.
