@@ -4,10 +4,11 @@ Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
 > **Status: in development — Phases 0–2 of 10 complete.**
-> The data pipeline and the model training pipeline are built and verified.
-> **No model has been trained yet** — full-scale training runs on Kaggle GPU
-> next. See [Current status](#current-status) for exactly what does and does
-> not work today.
+> A first model is trained. On the validation split its average error is
+> **$11.23 per product**, against **$14.52** for always guessing the median
+> price. The held-out test split hasn't been used yet; the chosen model is
+> scored on it once, in Phase 3. See [Current status](#current-status) for
+> exactly what does and does not work today.
 
 ---
 
@@ -33,7 +34,7 @@ service and a Next.js PWA.
 | Language | Python 3.12 |
 | Model framework | PyTorch 2.14 |
 | Vision backbone | `timm` 1.0.29 — `convnext_tiny.fb_in22k_ft_in1k` |
-| Training compute | Kaggle Notebooks (GPU) |
+| Training compute | Kaggle Notebooks (T4 GPU) |
 | Model export | TorchScript or ONNX *(Phase 3)* |
 | Backend API | FastAPI *(Phase 4)* |
 | Frontend | React / Next.js, installable PWA *(Phase 5)* |
@@ -64,13 +65,13 @@ for provenance and regeneration steps.
 
 ```
 ├── data/          # dataset docs; actual data is gitignored
-├── notebooks/     # exploratory data analysis
+├── notebooks/     # EDA, and the Kaggle training notebook
 ├── scripts/       # data cleaning, splitting, image download
-├── model/         # model definition, dataset, preprocessing, training
+├── model/         # model, dataset, preprocessing, training, evaluation
 ├── backend/       # FastAPI service          (Phase 4)
 ├── frontend/      # Next.js PWA              (Phase 5)
 ├── deploy/        # Docker + deploy config   (Phase 7)
-└── docs/          # guides
+└── docs/          # Kaggle guide and the experiment log
 ```
 
 ## Current status
@@ -79,18 +80,44 @@ for provenance and regeneration steps.
 
 - **Data pipeline** — cleaning, stratified splitting, and EDA over 73,517 rows
 - **Image pipeline** — resumable, crash-safe download and letterbox resize to
-  224×224. Verified at 18,214/18,214 images with zero failures.
+  224×224. All 73,517 images downloaded and checked on Kaggle, none missing.
 - **Training pipeline** — Dataset/DataLoader with train-only augmentation,
-  ConvNeXt-Tiny + regression head, SmoothL1 loss, per-epoch checkpointing and
-  file logging. Runs end-to-end.
+  ConvNeXt-Tiny + regression head, SmoothL1 loss, per-epoch checkpoints that
+  can't be corrupted by a crash, resume after a Kaggle timeout
+  (`--resume-from`), and a time budget that stops cleanly before the session
+  limit (`--max-hours`).
+- **Trained model (run1)** — 15 epochs on a Kaggle T4 GPU, about 15 minutes
+  per epoch.
+  Scored on the 11,028 validation images:
+
+  | | run1 | always guess the median ($14) |
+  |---|---|---|
+  | Average error (MAE) | **$11.23** | $14.52 |
+  | Median error | **$5.71** | $8.65 |
+  | SMAPE | 53.5% | 70.6% |
+
+- **Evaluation** — `model/evaluate.py` scores any checkpoint in dollars,
+  breaks the error down by price range, writes per-image predictions (worst
+  first), and compares two runs with a bootstrap confidence interval.
+- **One controlled experiment** — run2 trained on log(price) instead of
+  price. It did not beat run1: $11.50 average error, a difference of +$0.27
+  (95% interval +$0.13 to +$0.40). The decision rule was written down before
+  the run. Both runs are in [`docs/experiments.md`](docs/experiments.md).
+
+**Known limits of the current model:**
+
+- Validation error stops improving after 2–4 epochs while training error
+  keeps falling: the model memorises the training images.
+- Errors are largest at the extremes. For items under $5 the average error
+  ($5.89) is bigger than the price itself, and for items over $50 it is
+  $42.15. The model hedges toward typical prices, most likely because much of
+  what sets a price (brand, pack size, quantity) is hard to see in a photo.
 
 **Not done yet:**
 
-- **No trained model.** Local runs were CPU sanity checks over a few dozen
-  samples, purely to prove the pipeline executes — the resulting checkpoints
-  are not usable models. Full training is the immediate next step.
-- No evaluation against the held-out test split (Phase 3)
-- No backend, frontend, or deployment (Phases 4–7)
+- No score on the held-out test split. That happens once, for run1, in
+  Phase 3.
+- No model export, backend, frontend, or deployment (Phases 3–7)
 
 ## Setup
 
@@ -133,14 +160,25 @@ python model/train.py --subset-mode dev --epochs 1 --max-batches 5 \
     --batch-size 8 --checkpoint-dir model/checkpoints/sanity
 ```
 
-For the real training run on GPU, see
+Score a trained checkpoint in dollars (here on the dev subset; the real runs
+use the full metadata and images on Kaggle):
+
+```bash
+python model/evaluate.py --checkpoint model/checkpoints/sanity/best.pt \
+    --name sanity --metadata data/processed/dev_subset.csv \
+    --image-dir data/processed/images/dev --split val --out-dir model/logs/eval
+```
+
+The real training runs happen on a Kaggle GPU with
+[`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb); its first cell
+holds the run's settings. Step-by-step instructions are in
 [`docs/kaggle_training_guide.md`](docs/kaggle_training_guide.md).
 
 ## Roadmap
 
 - [x] **Phase 0** — Repository and environment setup
 - [x] **Phase 1** — Data collection and preparation
-- [x] **Phase 2** — Model design and training pipeline
+- [x] **Phase 2** — Model design, training, and one controlled experiment
 - [ ] **Phase 3** — Model evaluation, error analysis, export
 - [ ] **Phase 4** — FastAPI backend
 - [ ] **Phase 5** — Next.js PWA frontend
