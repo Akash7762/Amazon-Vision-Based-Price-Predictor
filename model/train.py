@@ -141,8 +141,17 @@ def history_path(checkpoint_dir: str) -> str:
 
 
 def save_history(checkpoint_dir: str, history) -> None:
-    with open(history_path(checkpoint_dir), "w") as f:
+    path = history_path(checkpoint_dir)
+    with open(path + ".tmp", "w") as f:
         json.dump(history, f, indent=2)
+    os.replace(path + ".tmp", path)
+
+
+def save_checkpoint(checkpoint, path: str) -> None:
+    # Write then rename, so a session killed mid-save can't leave a half-written
+    # best.pt behind and wipe out the best model.
+    torch.save(checkpoint, path + ".tmp")
+    os.replace(path + ".tmp", path)
 
 
 def load_history(checkpoint_dir: str):
@@ -210,7 +219,13 @@ def main():
     parser.add_argument("--log-every", type=int, default=50,
                          help="Log a batch_loss line every N batches (0 disables per-batch "
                               "logging). Epoch summaries are always logged.")
+    parser.add_argument("--max-hours", type=float, default=None,
+                         help="Wall-clock budget for this run. Before each epoch, stop cleanly "
+                              "if another epoch (at the average pace so far) would go over it. "
+                              "Set it below the Kaggle session limit so the run finishes and "
+                              "saves its output instead of being killed.")
     args = parser.parse_args()
+    run_start = time.time()
 
     paths = dict(SUBSET_PATHS[args.subset_mode])
     if args.metadata:
@@ -303,7 +318,20 @@ def main():
                 f"{ckpt['epoch']} to train further."
             )
 
+    epoch_times = []
     for epoch in range(start_epoch, args.epochs + 1):
+        if args.max_hours is not None and epoch_times:
+            elapsed = time.time() - run_start
+            avg_epoch = sum(epoch_times) / len(epoch_times)
+            if elapsed + avg_epoch > args.max_hours * 3600:
+                logger.info(
+                    f"STOPPING EARLY before epoch {epoch}: {elapsed / 3600:.2f} h used, "
+                    f"next epoch needs ~{avg_epoch / 60:.0f} min, budget is "
+                    f"{args.max_hours} h. Continue later with --resume-from."
+                )
+                break
+
+        epoch_start = time.time()
         train_loss = run_epoch(model, train_loader, loss_fn, optimizer, device,
                                 logger, epoch, "train", max_batches=args.max_batches,
                                 log_every=args.log_every)
@@ -327,7 +355,7 @@ def main():
             # best-val-loss watermark without depending on history.json.
             "history": history,
         }
-        torch.save(checkpoint, epoch_ckpt_path)
+        save_checkpoint(checkpoint, epoch_ckpt_path)
         logger.info(f"Saved checkpoint: {epoch_ckpt_path}")
 
         # Rewrite history.json every epoch, not just at the end: a Kaggle
@@ -337,9 +365,17 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_ckpt_path = os.path.join(args.checkpoint_dir, "best.pt")
-            torch.save(checkpoint, best_ckpt_path)
+            save_checkpoint(checkpoint, best_ckpt_path)
             logger.info(f"New best val_loss={val_loss:.4f} -> saved {best_ckpt_path}")
 
+        epoch_times.append(time.time() - epoch_start)
+        logger.info(f"epoch={epoch} took {epoch_times[-1] / 60:.1f} min, "
+                    f"run total {(time.time() - run_start) / 3600:.2f} h")
+
+    if history:
+        best = min(history, key=lambda h: h["val_loss"])
+        logger.info(f"best_epoch={best['epoch']} best_val_loss={best['val_loss']:.4f} "
+                    f"last_epoch={history[-1]['epoch']}")
     logger.info(f"Saved training history to {history_path(args.checkpoint_dir)}")
     logger.info("=== Training run end ===")
 
