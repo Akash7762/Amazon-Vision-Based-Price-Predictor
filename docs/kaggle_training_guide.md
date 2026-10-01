@@ -3,15 +3,16 @@
 This covers all of Phase 2 on Kaggle, starting from a fresh notebook: download
 the images, train, and decide which checkpoint goes to Phase 3.
 
-**No real model has been trained yet.** The only checkpoints so far came from
-5-batch CPU sanity runs proving the code executes.
+The first real model, run1, was trained on Oct 1 (val MAE well below the
+median-price baseline). Results for every run are in
+[`experiments.md`](experiments.md).
 
 It uses two notebooks:
 
 | Notebook | Job | Accelerator | Output |
 |---|---|---|---|
 | **A — Download** | fetch and resize ~73.5k images | **None (CPU)** | `images.zip`, made into a Dataset |
-| **B — Train** | smoke test, then the real run | **GPU** | `best.pt`, `history.json`, logs |
+| **B — Train** | train one run, score it on val, compare with an earlier run | **GPU** | `best.pt`, `history.json`, `eval/` metrics |
 
 Downloading needs no GPU. Running it in a GPU session uses up your weekly GPU
 quota while the notebook waits on the network.
@@ -38,8 +39,10 @@ before relying on them.
 | `/kaggle/input` | read-only | Checkpoints go to `/kaggle/working`, never next to the inputs. |
 | Internet | needs a phone-verified account | Required for `git clone`, `pip`, pretrained weights, and image downloads. |
 | CPU cores | ~4 | `--num-workers 4`. Data loading may be the bottleneck, not the GPU. |
-| GPU choice | P100 or T4 ×2 | Both work. The script uses **one** GPU, so the second T4 sits idle. |
+| GPU choice | T4 ×2 or P100 | Pick **T4 ×2**. Recent PyTorch builds have been dropping support for older GPUs like the P100. The script uses **one** GPU, so the second T4 sits idle. |
 | Committed runs | start from a **fresh** environment and run every cell top to bottom | Every cell must stand alone. Nothing from your interactive session carries over. |
+| Concurrent GPU sessions | limited; a saved run waits in **Queued** while another GPU session of yours is open | Stop the interactive session before saving. Watch progress from the notebook page, not the editor, since opening the editor can start a session. |
+| `!command` in a cell | a failing command doesn't stop the notebook | Notebook B wraps commands in `run()`, which raises on failure. |
 
 ---
 
@@ -185,213 +188,200 @@ distinct, like `amazon-price-images-v2`, so it can't be confused with the old
 dataset that has duplicate folders.
 
 **Check:** the new Dataset exists. Kaggle may keep it as `images.zip` or
-extract it into an `images/` folder. Step B2 handles both.
+extract it into an `images/` folder. On Sep 26 it extracted it, under
+`/kaggle/input/datasets/<username>/amazon-price-images-v2/images`.
 
 ---
 
-## Notebook B — Train (GPU)
+## Notebook B — Train and compare (GPU)
 
-New Notebook → Accelerator **GPU** (P100 or T4), Internet **On**. Attach
-`amazon-price-images-v2` and the metadata dataset.
+The cells live in [`notebooks/kaggle_train.ipynb`](../notebooks/kaggle_train.ipynb),
+one notebook for every run: **Cell 0 holds the run's settings and is the only
+cell you edit.** Import the file into Kaggle rather than retyping it. (run1
+used an earlier 6-cell version, still in git history at `fd359e4`.)
 
-Every cell below must work in a fresh session, because the commit runs them
-all from the top.
+| Cell | What it does | Time on a T4 |
+|---|---|---|
+| 0 | settings: run name, target, epochs, which earlier run to compare with | — |
+| 1 | checks the GPU really works (runs a convolution) | seconds |
+| 2 | clones the code, refuses to go on if GitHub has old code, installs timm | ~1 min |
+| 3 | fixed data paths, image check, finds the earlier run's `best.pt` | ~1 min |
+| 4 | scores the earlier run on val with `model/evaluate.py` | ~2 min |
+| 5 | smoke test: 5 batches with this run's settings | ~2 min |
+| 6 | the training run | ~15 min per epoch |
+| 7 | scores this run's `best.pt` on val, then compares the two | ~2 min |
+| 8 | summary, loss and dollar-error plots, trims old checkpoints | seconds |
 
-### B1. GPU check, then code
+Why the cells look the way they do:
 
-```python
-import torch
-print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))
-assert torch.cuda.is_available(), "no GPU: fix Settings -> Accelerator before going further"
-```
+- **Every shell command goes through `run()`**, which shows output live and
+  **raises if the command fails**. A plain `!command` ignores failures, so a
+  broken smoke test would still roll on into the long run. Paths are quoted
+  with `q()`.
+- **`python -u`** so training lines reach the log as they happen.
+- **`--max-hours 8`**: before each epoch the script checks another epoch
+  still fits; if not it stops cleanly, so the run finishes and saves its
+  output instead of being killed at the session limit.
+- **Checkpoints are written to a temp file and renamed**, so a session dying
+  mid-save can't corrupt `best.pt`.
+- **`--select-by val_mae`**: `best.pt` is the epoch with the lowest val
+  error *in dollars*. The loss can't be compared across targets (with
+  `--target log` it's in log-dollars), and the epoch with the lowest loss
+  isn't always the one with the lowest dollar error.
+- **Cell 4 scores the earlier run before training**, with the same script
+  and the same images as Cell 7. That makes the comparison like-for-like,
+  and if anything is wrong with the evaluation it shows up in minute 5, not
+  after the long run.
 
-```python
-!rm -rf /tmp/repo && git clone -b feature/train-resume --depth 1 \
-    https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor.git /tmp/repo
-%cd /tmp/repo
-!pip install -q "timm>=1.0.27"
-```
+### B0. Before you start
 
-**Don't** `pip install torch` or `pip install -r requirements.txt`. Kaggle
-already has a CUDA build of torch. `requirements.txt` pins the CPU-only
-wheel for the local Windows machine, and installing it would replace the GPU
-build.
+1. On your PC: `git push`, so GitHub has the latest `feature/train-resume`.
+2. On Kaggle: **View Active Events** (bottom left of any editor) → stop
+   everything that's running. An open GPU session is the usual reason a saved
+   run sits in **Queued**.
+3. Check your GPU hours left (right panel → Session options). A 6-epoch run
+   uses about 1¾ hours, a 15-epoch run about 4.
 
-### B2. Put the images on local disk
+### B1. Create the notebook
 
-```python
-import glob, os, zipfile, pandas as pd
+1. **Create → New Notebook** → **File → Import Notebook** → upload
+   `notebooks/kaggle_train.ipynb`.
+2. Right panel → **Session options**: Accelerator **GPU T4 x2**, Internet
+   **On**.
+3. **Add Input**, three of them:
+   - `amazon-price-metadata`
+   - `amazon-price-images-v2`
+   - the earlier run's output, e.g. `amazon-price-run1`. Attach it either as
+     the Dataset you made from its output, or straight from **Add Input →
+     Notebooks → Your Work**. Not both, or Cell 3 finds two `best.pt` files
+     and stops.
 
-META = glob.glob("/kaggle/input/**/metadata.csv", recursive=True)[0]
-IMG = "/tmp/images"
+### B2. Set Cell 0
 
-zips = glob.glob("/kaggle/input/**/images.zip", recursive=True)
-if zips:
-    with zipfile.ZipFile(zips[0]) as z:
-        z.extractall("/tmp")          # -> /tmp/images/*.jpg
-else:
-    # Kaggle extracted the zip on upload. Find the folder that holds the jpgs.
-    cands = [d for d in glob.glob("/kaggle/input/**/", recursive=True)
-             if len(glob.glob(os.path.join(d, "*.jpg"))) > 70000]
-    print(cands)
-    IMG = cands[0]
-
-ids  = set(pd.read_csv(META)["sample_id"].astype(str))
-have = {f[:-4] for f in os.listdir(IMG) if f.endswith(".jpg")}
-print(f"META={META}\nIMG={IMG}\nimages={len(have)} missing={len(ids - have)}")
-assert len(ids - have) < 100
-```
-
-**Check:** `missing` is in single digits. If `cands` lists more than one
-folder, you've attached the old dataset too. Detach it.
-
-### B3. Smoke test (5 batches)
-
-```python
-!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
-    --epochs 1 --max-batches 5 --batch-size 64 --num-workers 4 \
-    --checkpoint-dir /tmp/smoke --log-path /tmp/smoke/smoke.log
-```
-
-**Check** these lines in the output:
-- `device=cuda cuda_available=True`
-- `split='train': ... usable rows` around 51k, and `split='val'` around 11k.
-  `0 usable rows` means `IMG` is wrong.
-- a finite `avg_loss`
-
-The smoke test writes to `/tmp`, so it doesn't clutter the saved output.
-
-### B4. Measure before choosing `--epochs`
-
-Run this interactively. It does a 100-batch slice and times it:
+For run2 it already reads:
 
 ```python
-!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
-    --epochs 1 --max-batches 100 --batch-size 64 --num-workers 4 \
-    --checkpoint-dir /tmp/timing --log-path /tmp/timing/t.log --log-every 0
+RUN_NAME = "run2"
+TARGET = "log"
+EPOCHS = 6
+COMPARE_WITH = "auto"
+COMPARE_NAME = "run1"
 ```
 
-Read `elapsed_sec` from the `split=train DONE` line. Then:
+For a later run, change the name and the one thing being tested. If you
+don't want a comparison, set `COMPARE_WITH = None` and skip the third input.
 
-```
-seconds per epoch  ≈ (train elapsed / 100) × (51,000 / 64)  +  a full val pass
-epochs that fit    ≈ (9 hrs × 3600) / seconds per epoch
-```
+### B3. Rehearse Cells 0–5 interactively
 
-If 15 epochs fit, use 15. If not, use what fits and continue in a second
-session with step B7. A committed run that hits the session limit is the one
-really expensive mistake in this workflow.
+Shift + Enter through Cells 0–5. **Don't run 6, 7 or 8.**
 
-Also look at GPU use during the timing run (`!nvidia-smi` in another cell).
-If it's low, the 4 CPUs decoding and augmenting JPEGs are the bottleneck.
-That's normal on Kaggle. It means a faster GPU wouldn't help, not that
-something is broken.
+| Cell | Good output |
+|---|---|
+| 0 | `run2: target=log, epochs=6, compare with run1 (auto)` |
+| 1 | `GPU: Tesla T4` and `GPU works, test output shape: (8, 16, 222, 222)` |
+| 2 | a commit line, `code is up to date`, then `torch ... \| timm ... \| cuda OK`. Red pip "dependency resolver" warnings above it are harmless. |
+| 3 | `images=73517 missing=0`, the manifest with `"resize_mode": "letterbox_pad"`, and exactly one `earlier-run checkpoints found:` path ending in `checkpoints/best.pt` |
+| 4 | `=== run1 on val: 11028 images, epoch 14, target=price ...` and two tables. Its MAE is run1's real val error in dollars. |
+| 5 | `target=log`, 51461 train / 11028 val usable rows, `avg_loss=... mae=$...`, `=== Training run end ===` |
 
-### B5. The real run
+### B4. Stop the session, then save the version
+
+1. **Stop the interactive session first** (power icon / Stop session), and
+   check View Active Events shows nothing running.
+2. **Save Version** → name it after the run (e.g. `run2 - log price e6`) →
+   **Save & Run All (Commit)** → Advanced: always save output → **Save**.
+   If Save Version is greyed out without a session, start one, save, and
+   stop it straight away.
+3. Close the editor tab. **Opening the editor again can start a new
+   session.** Follow progress from the notebook's page (Your Work → Code).
+
+### B5. While it runs
+
+- **Queued** is normal and uses no GPU hours. Still queued after an hour?
+  Check View Active Events for a session you forgot.
+- **Running**: Cells 0–5 take ~8–10 min. Then a `batch=` line roughly every
+  minute and an epoch summary every ~15 min, now with `mae=$...` on each
+  `DONE` line. 6 epochs ≈ 1.5 h, plus ~5 min for Cells 7–8.
+
+### B6. When it finishes
+
+Output holds `checkpoints/best.pt` and `checkpoints/epoch_<last>.pt`
+(~334 MB each), `checkpoints/history.json`, `logs/train.log`,
+`loss_curve.png`, and `eval/` with each run's metrics (`*_val.json`),
+per-image predictions (`*_val_predictions.csv`, worst first) and
+`comparison_val.md`.
+
+1. Download `history.json`, `train.log`, `loss_curve.png` and the `eval/`
+   folder. `best.pt` too if this run turns out to be the keeper.
+2. Output → **New Dataset** → e.g. `amazon-price-run2`, so later runs and
+   Phase 3 can attach it.
+
+### B7. Only if Cell 8 says "Stopped early by the time budget"
+
+Make the stopped run's output a Dataset (e.g. `amazon-price-run2`), attach
+it, and in Cell 0 set `COMPARE_WITH` to run1's exact path instead of
+`"auto"` (with two runs attached, auto finds two). Then replace Cell 6 with
+this, changing `epoch_3.pt` to the file Cell 8 named:
 
 ```python
-!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
-    --epochs 15 --batch-size 64 --lr 1e-4 --num-workers 4 \
-    --checkpoint-dir /kaggle/working/checkpoints \
-    --log-path /kaggle/working/logs/train.log
+# Cell 6 (resume) - continues to EPOCHS from the last saved epoch
+PREV = "/kaggle/input/datasets/akashverma7762/amazon-price-run2/checkpoints"
+print(sorted(os.listdir(PREV)))
+run(f"python -u model/train.py --subset-mode full --metadata {q(META)} --image-dir {q(IMG)} "
+    f"--target {TARGET} --select-by val_mae --epochs {EPOCHS} --batch-size 64 --lr 1e-4 "
+    f"--num-workers 4 --max-hours 8 --resume-from {q(PREV + '/epoch_3.pt')} "
+    f"--checkpoint-dir /kaggle/working/checkpoints --log-path /kaggle/working/logs/train.log")
 ```
 
-Set `--epochs` to what B4 said fits. Then **delete or comment out the B4
-cell**, since the commit would run it again for nothing. Then **Save Version
-→ Save & Run All (Commit)**.
+`--epochs` is the final epoch number, not how many more. The target must
+match the checkpoint (the script refuses otherwise). Weights, optimizer
+state, history and the best-so-far score are restored; shuffle order and RNG
+state are not, so say so in the report. Then repeat B4–B6.
 
-What the script does during the run:
-- saves `epoch_N.pt` every epoch, plus `best.pt` for the lowest val loss
-- rewrites `history.json` after every epoch, so a crash still leaves a loss
-  curve
-- logs batch loss every 50 batches (`--log-every`), so the output stays
-  readable
+### B8. Troubleshooting
 
-`--epochs 15 --batch-size 64 --lr 1e-4` are **starting points, not tuned
-values**. Step B9 is where you judge them.
+| Error | Cause | Fix |
+|---|---|---|
+| Cell 1 `AssertionError: No GPU` | accelerator not set | Session options → GPU T4 x2, restart session |
+| Cell 1 `no kernel image is available` | P100 selected | switch to GPU T4 x2 |
+| Cell 2 `Could not resolve host: github.com` | Internet off | Session options → Internet On |
+| Cell 2 `OLD CODE on GitHub` | branch not pushed | `git push` on your PC, rerun Cell 2 |
+| Cell 3 `Attach exactly one metadata and one images dataset` | wrong / extra datasets | attach only metadata + images-v2 (+ the earlier run) |
+| Cell 3 `Expected exactly one attached earlier run` | earlier run not attached, or attached twice | attach it once, or set `COMPARE_WITH` to a path / `None` |
+| `CUDA out of memory` | unexpected at batch 64 on a T4 | tell me before changing batch size, it changes the experiment |
+| `DataLoader worker ... killed` / `bus error` | shared-memory limits | `--num-workers 4` → `2` in Cells 5 and 6 |
+| HF `unauthenticated requests` warning | no Hugging Face token | harmless |
 
-### B6. Trim the output and plot the curve
+### B9. Read the results and decide
 
-Add this as the last cell, so it runs inside the commit:
+This is roadmap Phase 2, step 4. Record every run in
+[`experiments.md`](experiments.md), including the ones that lose.
 
-```python
-import json, os, glob, re
-import matplotlib.pyplot as plt
+**The bar to beat** is always predicting the median train price ($14.00):
+val MAE **$14.52**, val SmoothL1 14.03.
 
-ck = "/kaggle/working/checkpoints"
-h = json.load(open(f"{ck}/history.json"))
+**Compare runs on val MAE in dollars**, from Cell 7's comparison: same
+script, same 11,028 images. The table under it gives the paired-bootstrap
+95% interval for the difference. If the interval includes 0, the runs
+aren't distinguishable on this val set. That interval covers which images
+landed in val; it does **not** cover training randomness (seed, shuffle
+order), so a small gap is weak evidence even when the interval excludes 0.
 
-# Each checkpoint is roughly 330 MB (weights + AdamW state). Keep best + last only.
-epochs = sorted(int(re.search(r"epoch_(\d+)", p).group(1)) for p in glob.glob(f"{ck}/epoch_*.pt"))
-for e in epochs[:-1]:
-    os.remove(f"{ck}/epoch_{e}.pt")
-
-plt.plot([r["epoch"] for r in h], [r["train_loss"] for r in h], label="train")
-plt.plot([r["epoch"] for r in h], [r["val_loss"] for r in h], label="val")
-plt.xlabel("epoch"); plt.ylabel("SmoothL1 loss"); plt.legend(); plt.grid(alpha=.3)
-plt.savefig("/kaggle/working/loss_curve.png", dpi=150, bbox_inches="tight")
-print(json.dumps(h, indent=1))
-```
-
-The newest `epoch_N.pt` is kept so B7 can resume from it.
-
-**Check:** the committed version's Output has `checkpoints/best.pt`,
-`checkpoints/epoch_<last>.pt`, `checkpoints/history.json`,
-`logs/train.log` and `loss_curve.png`.
-
-### B7. If you need more epochs, resume
-
-Make the finished run's output into a Dataset (Output → New Dataset, e.g.
-`amazon-price-run1`). Make a copy of Notebook B, attach that dataset, and
-swap the B5 cell for:
-
-```python
-PREV = glob.glob("/kaggle/input/amazon-price-run1/**/checkpoints", recursive=True)[0]
-!python model/train.py --subset-mode full --metadata {META} --image-dir {IMG} \
-    --epochs 15 --batch-size 64 --lr 1e-4 --num-workers 4 \
-    --resume-from {PREV}/epoch_7.pt \
-    --checkpoint-dir /kaggle/working/checkpoints \
-    --log-path /kaggle/working/logs/train.log
-```
-
-- `--epochs` is the **final epoch number**, not how many more to run. From
-  epoch 7 with `--epochs 15`, it runs 8–15. The script refuses to start if
-  the checkpoint is already past `--epochs`.
-- It restores the weights, optimizer state, loss history and best-val-loss,
-  so `best.pt` still means best across both sessions.
-- Keep `--batch-size`, `--lr` and pretrained the same. The script warns if
-  they differ, because it's no longer one experiment.
-- It does **not** restore the shuffle order or RNG state. Mention that in
-  the report rather than claiming the run continued exactly.
-
-### B8. Save the results
-
-From the final version's Output, download `checkpoints/best.pt`,
-`checkpoints/history.json`, `logs/train.log` and `loss_curve.png`. The last
-three are what your report and viva use. Also make the output a Dataset, so
-Phase 3 can attach `best.pt` without re-uploading it.
-
-**Check:** `best.pt` is on your machine **and** in a Kaggle Dataset.
-
-### B9. Read the curve and decide
-
-This is roadmap Phase 2, step 4.
+Reading a curve:
 
 | What you see | What it means | What to do next |
 |---|---|---|
-| val loss still falling at the last epoch | undertrained | more epochs via B7 |
-| val loss bottoms out, then rises | overfitting | `best.pt` already holds the best epoch. Try stronger augmentation or fewer epochs. |
-| val loss flat from epoch 1 | not learning | check `--lr`. Re-read the B3 output. |
-| train loss far below val loss, and both flat | memorising | more augmentation or regularisation |
+| val still improving at the last epoch | undertrained | more epochs via B7 |
+| val bottoms out, then rises | overfitting | `best.pt` already holds the best epoch |
+| val flat from epoch 1 | not learning | check `--lr`; re-read the Cell 5 output |
+| val flat while train keeps falling (run1) | memorising | regularisation / augmentation, not more epochs |
 
-For tuning, change **one** thing per run and keep each run's
-`history.json` as its own Dataset, so comparisons are real. Your weekly GPU
-quota limits how many runs you can do, so use them on what the curve points
-to.
+Change **one** thing per run. Your weekly GPU hours cap how many runs you
+get, so spend them where the curve points.
 
-**Phase 2 is done when** you can say, from the curve, why the checkpoint you
-kept is the one you kept. That's where Phase 3 starts, and it's a likely
-viva question.
+**Phase 2 is done when** you can say why the checkpoint you kept is the one
+you kept, from numbers you'd defend in the viva. Then Phase 3 scores it once
+on the test split.
 
 ---
 
@@ -401,7 +391,8 @@ viva question.
   look at test metrics while tuning in B9.
 - No `kaggle kernels push` automation. Kaggle API credentials were never set
   up, so this is the manual notebook route.
-- The hyperparameters are unvalidated defaults. No search has been run.
+- Tuning so far is one change at a time (run2: log-price target); no
+  systematic hyperparameter search.
 - The local `data/processed/images/dev` cache was downloaded before
   letterbox padding existed, so those images are stretched. That only
   matters for local sanity runs. To refresh it:
