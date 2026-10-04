@@ -1,0 +1,84 @@
+{
+  "name": "run1",
+  "split": "test",
+  "checkpoint": "/kaggle/input/datasets/akashverma7762/amazon-price-run1/checkpoints/best.pt",
+  "epoch": 14,
+  "target": "price",
+  "train_median_price": 14.0,
+  "model": {
+    "n": 11028,
+    "mae": 11.268329738371229,
+    "rmse": 19.161308830055173,
+    "median_ae": 5.736781544685364,
+    "smape": 53.98636063604691,
+    "bias": -4.272734064134052
+  },
+  "model_ci95": {
+    "mae": [
+      10.99372741956449,
+      11.561506126213423
+    ],
+    "smape": [
+      53.17996545726492,
+      54.79042701545578
+    ]
+  },
+  "negative_predictions": 0,
+  "baseline_median": {
+    "n": 11028,
+    "mae": 14.50778019586507,
+    "rmse": 23.656815936758846,
+    "median_ae": 8.71,
+    "smape": 70.51618890422166,
+    "bias": -7.759567464635474
+  },
+  "by_price_range": [
+    {
+      "range": "$0-5",
+      "n": 1841,
+      "model_mae": 5.833735858523801,
+      "baseline_mae": 10.673389462248778,
+      "model_smape": 72.8044572266568,
+      "baseline_smape": 124.44644060945936,
+      "model_bias": 5.670924609357543
+    },
+    {
+      "range": "$5-10",
+      "n": 2326,
+      "model_mae": 5.3569902858863285,
+      "baseline_mae": 6.45055030094583,
+      "model_smape": 45.52628830565177,
+      "baseline_smape": 61.14974582657339,
+      "model_bias": 4.144991124913494
+    },
+    {
+      "range": "$10-20",
+      "n": 2913,
+      "model_mae": 6.109800453788425,
+      "baseline_mae": 2.5131943014074833,
+      "model_smape": 39.0234744090198,
+      "baseline_smape": 17.125298351804755,
+      "model_bias": 0.9941699857937689
+    },
+    {
+      "range": "$20-50",
+      "n": 2844,
+      "model_mae": 13.158528454528621,
+      "baseline_mae": 17.6065611814346,
+      "model_smape": 53.532679089734565,
+      "baseline_smape": 73.33939087700323,
+      "model_bias": -8.99352471526686
+    },
+    {
+      "range": "$50+",
+      "n": 1104,
+      "model_mae": 41.52732752507148,
+      "baseline_mae": 61.543582427536236,
+      "model_smape": 81.07981200763079,
+      "baseline_smape": 133.92128942765208,
+      "model_bias": -40.325693568881015
+    }
+  ],
+  "predictions_csv": "run1_test_predictions.csv",
+  "seconds": 1595.5
+}

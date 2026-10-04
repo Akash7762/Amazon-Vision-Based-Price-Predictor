@@ -81,6 +81,24 @@ interval. Choosing the epoch and the run on val didn't flatter the val
 number by any amount we can measure, so the val results in
 [`experiments.md`](experiments.md) were a fair guide.
 
+**Is the test score honest?** Some products share a photo: 2,110 photo links
+are used by more than one product (6.4% of all rows), and 565 test items
+(5.1%) have their exact photo in the training set. If those were duplicates
+with the same price, the model could have memorised them and flattered the
+score. Checked after the run:
+
+| | test MAE |
+|---|---|
+| all 11,028 test items (the headline) | $11.268 |
+| without the 83 items whose photo **and** price appear in training | $11.318 |
+| without all 565 items whose photo appears in training | $11.225 (95% interval $10.93 to $11.53) |
+
+The 83 true duplicates are priced suspiciously well ($4.67 error), but they
+are too few to matter: removing them moves the score by 5 cents. Most
+shared photos belong to products with *different* prices (one photo, several
+listings), which is noise in the data rather than a leak. The headline
+number stands.
+
 By price range, on test:
 
 | Price range | n | MAE ($) | baseline MAE | SMAPE (%) | baseline SMAPE | bias ($) |
@@ -102,7 +120,21 @@ No prediction was below $0; 8 were below $1. A raw-price head can still
 produce a negative price for an unusual photo, so the Phase 4 backend should
 clamp its output anyway.
 
-### 2. The pack-size check
+### 2. Predicted vs actual
+
+![run1: predicted vs actual price](phase3/calibration.png)
+
+The orange line is the median prediction for each price level. It rises,
+so **the model gets the order right**: pricier items get higher guesses. But
+it rises much less steeply than the dashed "perfect" line. For items around
+$1.74 the median guess is $5.59; for items around $108 it is $38.37. On this
+log scale the predictions move about **half as far as the real prices**
+(slope about 0.47). The two lines cross between $10 and $17, near the
+median price, which is where the model is most accurate.
+
+The flat row of dots at about $45 is one brand, covered in section 5.
+
+### 3. The pack-size check
 
 **Multipacks are guessed 4.5% lower than single items at the same price
 level** (95% interval -7.0% to -1.9%). By the rule written before the run,
@@ -115,7 +147,75 @@ not the main reason for the error. The main reason is the hedging above:
 from a photo alone, the model can't tell expensive items from mid-priced
 ones well enough to commit to a high or low price.
 
-### 3. The export
+The breakdown by price range (not part of the pre-registered check, so read
+it as a lead, not a finding):
+
+| Price range | single items | multipacks | single: predicted vs actual | multipack: predicted vs actual |
+|---|---|---|---|---|
+| $0-5 | 1186 | 655 | +112.6% | +137.2% |
+| $5-10 | 1671 | 655 | +32.1% | +36.5% |
+| $10-20 | 2187 | 726 | -2.4% | -15.2% |
+| $20-50 | 1819 | 1025 | -34.2% | -43.9% |
+| $50+ | 583 | 521 | -62.9% | -60.3% |
+
+The overall -4.5% comes from the $10-50 ranges. Under $10 it reverses:
+cheap multipacks are guessed *higher* than cheap single items. Section 4
+suggests why: several cheap "multipack" listings carry what looks like a
+single unit's price.
+
+### 4. The worst predictions
+
+**Priced furthest too low:**
+
+![12 items priced furthest too low](phase3/worst_under.jpg)
+
+8 of the 12 are bulk or case quantities by their own product names: a
+500-pack of drink-mix sticks, "12 cans per case", a 24-can tuna pack, a
+288-count box of taffy, 70 cereal boxes, a 20 lb bag of chili powder, a 117 oz
+catering can, a variety-pack case. Each is $120-143, and almost every photo
+shows a single unit, so the model prices roughly one unit. One more
+(Pillsbury) has a brand logo instead of a product photo. This is the pack-size problem at its extreme,
+and no amount of training fixes it: the quantity isn't in the photo.
+
+**Priced most too high, by ratio:**
+
+![12 items priced most too high](phase3/worst_over.jpg)
+
+About half of these **look like errors in the data rather than the model**:
+a 24-pack of bottled water listed at $1.79, a 12-pack of 33 oz hot sauce at
+$2.98, a 12-pack of juice at $1.72, an 8-pack of cakes at $1.92, a 111 oz can
+of beans at $1.39, 80 oz of rice at $1.58. Those prices look like one unit's
+price on a multipack listing. The model's guesses ($22-92) may be closer to
+what the listing actually sells. The rest are genuine misses: small single
+items (a snack bar, a 2.75 oz bag of sweets, a dessert kit) priced like
+multipacks. We can't check the live listings, so the "data error" reading
+is a flag, not a proof.
+
+### 5. One brand, one price
+
+The row of dots at $45 in section 2 is almost entirely one tea brand,
+**Terra Vita**. It has 2,952 products in the dataset (4%), photographed in
+near-identical packaging: the same bag design with different label text
+(judging from the photos seen in the grids, and from how tightly the
+predictions bunch). They differ in flavour, size (4 oz or 8 oz, 25 or 50
+bags) and pack count (1, 2 or 3): information that is either small print on
+the label or not in the photo at all, since a 3-pack is photographed as one
+bag.
+
+| Terra Vita, test set (456 items) | |
+|---|---|
+| predictions between $45 and $46 | 352 |
+| spread of the predictions (sd) | $5.07 |
+| spread of the real prices (sd) | $27.77 |
+| MAE | **$21.25**, against $10.84 for every other product |
+
+The model learned "this bag is about $45", the brand's typical price, and
+can't read the label at 224×224 pixels to tell a 4 oz single bag from an
+8 oz 3-pack. Without this one brand the test MAE would be $10.84. It's the
+clearest example of the general limit: when price depends on information the
+photo doesn't show (or shows too small), the model falls back to an average.
+
+### 6. The export
 
 | | |
 |---|---|
@@ -127,3 +227,38 @@ ones well enough to commit to a high or low price.
 
 Both acceptance checks set in the plan passed, so `price_model.onnx` is the
 model the Phase 4 backend will serve.
+
+Checked again after downloading, on the development PC (Windows, CPU, no
+PyTorch loaded):
+
+- the downloaded file's sha256 matches the one recorded on Kaggle
+- it prices a photo in about **0.1 seconds**
+- the downloaded run1 `best.pt` and `price_model.onnx` agree to within
+  $0.00013 on 8 photos, so the backup checkpoint is the exported model
+
+The 112 MB model file is not in git. It goes into a GitHub release
+(`v0.1-model`) as a downloadable file, as the roadmap specifies.
+
+## What Phase 3 found, in short
+
+1. **On 11,028 held-out test images the model's average error is $11.27**,
+   22% below always guessing the median price ($14.51); median error $5.74
+   vs $8.71. The test confirms the validation estimate ($11.23), and holds
+   up when every test item with a photo also seen in training is removed
+   ($11.23).
+2. **It gets the order of prices right but compresses them**: cheap items
+   are guessed too high, expensive ones too low, and its guesses move about
+   half as far as real prices.
+3. **The biggest errors come from what the photo can't show**: bulk and
+   case quantities photographed as one unit, and product lines like Terra
+   Vita whose variants differ only in small label text. Pack size has a
+   measurable effect (-4.5%), but a small one.
+4. **Some of the worst "errors" look like data errors**: multipack listings
+   priced like a single unit.
+5. **The model is exported and verified**: ONNX matches PyTorch to under a
+   cent and runs without PyTorch in about 0.1 s per photo.
+
+Natural next steps, if there were time: use the product text alongside the
+photo (it carries the pack size and quantity), and clean listings whose
+price doesn't fit their pack size. Both are outside this project's
+image-only scope; they belong in the report's future-work section.
