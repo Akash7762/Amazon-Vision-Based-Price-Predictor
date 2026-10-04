@@ -391,7 +391,7 @@ on the test split.
 ## Notebook C — Phase 3: test score, error analysis, export (CPU)
 
 The cells live in [`notebooks/kaggle_phase3.ipynb`](../notebooks/kaggle_phase3.ipynb).
-It needs **no GPU**: scoring 11,028 test images on CPU takes 10–20 minutes,
+It needs **no GPU**: scoring the 11,028 test images on CPU took 27 minutes,
 so there's no GPU queue and no weekly GPU hours used.
 
 | Cell | What it does | Time on CPU |
@@ -400,7 +400,7 @@ so there's no GPU queue and no weekly GPU hours used.
 | 1 | prints the environment | seconds |
 | 2 | clones `feature/model-evaluation`, refuses old code, installs timm + onnx + onnxruntime + onnxscript | ~1 min |
 | 3 | data paths, image check, finds the one attached `checkpoints/best.pt` | ~1 min |
-| 4 | **the test score**, once, with a 95% interval, next to the val numbers | 10–20 min |
+| 4 | **the test score**, once, with a 95% interval, next to the val numbers | ~27 min |
 | 5 | error analysis: predicted-vs-actual chart, worst-prediction photos, pack-size check | ~1 min |
 | 6 | ONNX export, checked against PyTorch on 256 test images | 2–3 min |
 | 7 | re-prices 8 test photos with only onnxruntime (the backend's route) and checks they match Cell 4 | seconds |
@@ -428,7 +428,7 @@ so there's no GPU queue and no weekly GPU hours used.
 | 3 | `images=73517 missing=0`, one checkpoint path, and `epoch 14, target price` |
 
 Then **Save Version → Save & Run All (Commit)**, Advanced: always save output.
-About 20–30 minutes in total. When it finishes, download the `phase3/`
+About 35 minutes in total. When it finishes, download the `phase3/`
 folder from the Output tab (about 113 MB, almost all of it the `.onnx`
 file), and make the output a Dataset (`amazon-price-phase3`) so Phase 4 can
 attach the model.
