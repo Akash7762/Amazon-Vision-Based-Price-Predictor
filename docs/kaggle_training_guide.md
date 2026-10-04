@@ -304,7 +304,7 @@ Shift + Enter through Cells 0–5. **Don't run 6, 7 or 8.**
   Check View Active Events for a session you forgot.
 - **Running**: Cells 0–5 take ~8–10 min. Then a `batch=` line roughly every
   minute and an epoch summary every ~15 min, now with `mae=$...` on each
-  `DONE` line. 6 epochs ≈ 1.5 h, plus ~5 min for Cells 7–8.
+  `DONE` line. run2's 6 epochs took 1.75 h, plus ~5 min for Cells 7–8.
 
 ### B6. When it finishes
 
