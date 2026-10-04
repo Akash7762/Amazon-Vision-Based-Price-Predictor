@@ -3,12 +3,12 @@
 Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
-> **Status: in development — Phases 0–2 of 10 complete.**
-> A first model is trained. On the validation split its average error is
-> **$11.23 per product**, against **$14.52** for always guessing the median
-> price. The held-out test split hasn't been used yet; the chosen model is
-> scored on it once, in Phase 3. See [Current status](#current-status) for
-> exactly what does and does not work today.
+> **Status: in development — Phases 0–3 of 10 complete.**
+> The model is trained, tested and exported. On 11,028 held-out test images
+> its average error is **$11.27 per product**, against **$14.51** for always
+> guessing the median price (22% lower). It is exported to ONNX and runs
+> without PyTorch. See [Current status](#current-status) for exactly what
+> does and does not work today.
 
 ---
 
@@ -35,7 +35,7 @@ service and a Next.js PWA.
 | Model framework | PyTorch 2.14 |
 | Vision backbone | `timm` 1.0.29 — `convnext_tiny.fb_in22k_ft_in1k` |
 | Training compute | Kaggle Notebooks (T4 GPU) |
-| Model export | TorchScript or ONNX *(Phase 3)* |
+| Model export | ONNX, run with `onnxruntime` (no PyTorch needed to serve) |
 | Backend API | FastAPI *(Phase 4)* |
 | Frontend | React / Next.js, installable PWA *(Phase 5)* |
 | Containerization | Docker *(Phase 7)* |
@@ -65,13 +65,13 @@ for provenance and regeneration steps.
 
 ```
 ├── data/          # dataset docs; actual data is gitignored
-├── notebooks/     # EDA, and the Kaggle training notebook
+├── notebooks/     # EDA, and the Kaggle training and evaluation notebooks
 ├── scripts/       # data cleaning, splitting, image download
-├── model/         # model, dataset, preprocessing, training, evaluation
+├── model/         # training, evaluation, error analysis, ONNX export
 ├── backend/       # FastAPI service          (Phase 4)
 ├── frontend/      # Next.js PWA              (Phase 5)
 ├── deploy/        # Docker + deploy config   (Phase 7)
-└── docs/          # Kaggle guide and the experiment log
+└── docs/          # Kaggle guide, experiment log, evaluation report
 ```
 
 ## Current status
@@ -86,38 +86,55 @@ for provenance and regeneration steps.
   can't be corrupted by a crash, resume after a Kaggle timeout
   (`--resume-from`), and a time budget that stops cleanly before the session
   limit (`--max-hours`).
-- **Trained model (run1)** — 15 epochs on a Kaggle T4 GPU, about 15 minutes
-  per epoch.
-  Scored on the 11,028 validation images:
+- **Trained model (run1)** — 15 epochs on a Kaggle T4 GPU, 3.8 hours
+  (15.1 minutes per epoch). Scored once on the 11,028 held-out test images,
+  never used for any decision:
 
-  | | run1 | always guess the median ($14) |
+  | | run1, test | always guess the median ($14) |
   |---|---|---|
-  | Average error (MAE) | **$11.23** | $14.52 |
-  | Median error | **$5.71** | $8.65 |
-  | SMAPE | 53.5% | 70.6% |
+  | Average error (MAE) | **$11.27** (95% interval $10.99–$11.56) | $14.51 |
+  | Median error | **$5.74** | $8.71 |
+  | SMAPE | 54.0% | 70.5% |
 
-- **Evaluation** — `model/evaluate.py` scores any checkpoint in dollars,
-  breaks the error down by price range, writes per-image predictions (worst
-  first), and compares two runs with a bootstrap confidence interval.
+  The validation estimate was $11.23, so the test confirms it. Removing every
+  test item whose photo also appears in training gives $11.23, so the score
+  isn't inflated by duplicates.
+- **Evaluation and error analysis** — `model/evaluate.py` scores any
+  checkpoint in dollars with a bootstrap interval and compares runs;
+  `model/error_analysis.py` plots predicted vs actual, shows the worst
+  predictions with their photos, and runs a pack-size check. Full results in
+  [`docs/evaluation.md`](docs/evaluation.md).
 - **One controlled experiment** — run2 trained on log(price) instead of
-  price. It did not beat run1: $11.50 average error, a difference of +$0.27
-  (95% interval +$0.13 to +$0.40). The decision rule was written down before
-  the run. Both runs are in [`docs/experiments.md`](docs/experiments.md).
+  price. It did not beat run1: $11.50 average error on validation, a
+  difference of +$0.27 (95% interval +$0.13 to +$0.40). The decision rule was
+  written down before the run. Both runs are in
+  [`docs/experiments.md`](docs/experiments.md).
+- **Exported model** — `price_model.onnx` (112 MB), with normalisation and
+  the dollar conversion inside the graph. It matches PyTorch to within
+  $0.0002 on 256 test images and prices a photo in about 0.1 s on the
+  development PC's CPU, without PyTorch (`model/predict_onnx.py`).
 
 **Known limits of the current model:**
 
+- **It hedges toward typical prices.** It gets the order right (pricier
+  items get higher guesses), but its guesses move only about half as far as
+  real prices: items under $5 are guessed $5.67 too high on average, items
+  over $50 $40.33 too low.
+- **It can't see what the photo doesn't show.** The worst misses are bulk
+  and case quantities photographed as a single unit, and one tea brand
+  (4% of products) whose variants differ only in small label text, which the
+  model mostly prices at about $45 whatever the variant. Products sold in packs are guessed
+  4.5% lower than single items at the same price.
+- **Some labels look wrong.** Several of the worst "over-predictions" are
+  multipack listings priced like a single unit (a 24-pack of water at $1.79).
 - Validation error stops improving after 2–4 epochs while training error
   keeps falling: the model memorises the training images.
-- Errors are largest at the extremes. For items under $5 the average error
-  ($5.89) is bigger than the price itself, and for items over $50 it is
-  $42.15. The model hedges toward typical prices, most likely because much of
-  what sets a price (brand, pack size, quantity) is hard to see in a photo.
 
 **Not done yet:**
 
-- No score on the held-out test split. That happens once, for run1, in
-  Phase 3.
-- No model export, backend, frontend, or deployment (Phases 3–7)
+- GitHub release `v0.1-model` with the model file attached (the roadmap's
+  last Phase 3 step)
+- Backend, frontend, deployment (Phases 4–7)
 
 ## Setup
 
@@ -169,9 +186,18 @@ python model/evaluate.py --checkpoint model/checkpoints/sanity/best.pt \
     --image-dir data/processed/images/dev --split val --out-dir model/logs/eval
 ```
 
+Price your own product photos with the exported model. This needs only
+`onnxruntime`, `numpy` and `Pillow`, not PyTorch:
+
+```bash
+python model/predict_onnx.py --model price_model.onnx photo1.jpg photo2.jpg
+```
+
 The real training runs happen on a Kaggle GPU with
-[`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb); its first cell
-holds the run's settings. Step-by-step instructions are in
+[`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb) (its first cell
+holds the run's settings), and the test scoring, error analysis and export
+with [`notebooks/kaggle_phase3.ipynb`](notebooks/kaggle_phase3.ipynb).
+Step-by-step instructions are in
 [`docs/kaggle_training_guide.md`](docs/kaggle_training_guide.md).
 
 ## Roadmap
@@ -179,7 +205,7 @@ holds the run's settings. Step-by-step instructions are in
 - [x] **Phase 0** — Repository and environment setup
 - [x] **Phase 1** — Data collection and preparation
 - [x] **Phase 2** — Model design, training, and one controlled experiment
-- [ ] **Phase 3** — Model evaluation, error analysis, export
+- [x] **Phase 3** — Model evaluation, error analysis, export
 - [ ] **Phase 4** — FastAPI backend
 - [ ] **Phase 5** — Next.js PWA frontend
 - [ ] **Phase 6** — Integration and end-to-end testing

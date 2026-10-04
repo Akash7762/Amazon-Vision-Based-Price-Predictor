@@ -13,6 +13,9 @@ the target changes (run2's loss is in log-dollars).
 | **run1** | 2026-10-01 | — (first full run) | 15 | epoch 14, by val loss | **11.23** | 10.755 | **kept.** Plateaued by epoch ~4, train kept falling |
 | run2 | 2026-10-01 | target = log(price) | 6 | epoch 5, by val MAE | 11.50 | 0.285 (log) | no better than run1; plateaued by epoch 2, worse at 6 |
 
+**On the test split (Phase 3), run1 scores $11.27**, confirming the val
+figure below; see [`evaluation.md`](evaluation.md).
+
 **Current model: run1** (`best.pt`, epoch 14) — val MAE $11.23, median
 absolute error $5.71, vs $14.52 / $8.65 for always guessing the median.
 
@@ -24,7 +27,7 @@ absolute error $5.71, vs $14.52 / $8.65 for always guessing the median.
 linear head, SmoothL1 loss on raw price, AdamW lr 1e-4 (constant, no
 schedule), batch 64, 15 epochs, 224×224 letterboxed images, augmentation =
 RandomResizedCrop(0.8–1.0) + horizontal flip + colour jitter. Kaggle T4,
-~15 min/epoch, ~3.8 h total.
+15.1 min/epoch, 3.79 h total (from `train.log`).
 
 **Files:** [`run1_history.json`](experiments/run1_history.json),
 [`run1_loss_curve.png`](experiments/run1_loss_curve.png). Checkpoint is
@@ -117,7 +120,7 @@ price.
 **Files:** [`run2_history.json`](experiments/run2_history.json),
 [`run2_loss_curve.png`](experiments/run2_loss_curve.png), full evaluation
 output in [`run2_vs_run1_val.md`](experiments/run2_vs_run1_val.md). Kaggle
-T4, 6 epochs, ~15 min each.
+T4, 6 epochs, about 17 min each, 1.75 h total (from `train.log`).
 
 ![run2 loss curve](experiments/run2_loss_curve.png)
 
