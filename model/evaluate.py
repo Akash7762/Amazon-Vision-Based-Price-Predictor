@@ -20,9 +20,10 @@ Score a trained checkpoint in dollars, and compare runs.
 
 Metrics, all on the original dollar scale whatever the model was trained on:
 MAE, RMSE, median absolute error, SMAPE (%), and bias (mean of prediction
-minus price: negative means the model guesses low on average). Every report
-also scores "always predict the median train price" on the same images, so no
-number appears without its reference point.
+minus price: negative means the model guesses low on average), with a 95%
+bootstrap interval for MAE and SMAPE. Every report also scores "always
+predict the median train price" on the same images, so no number appears
+without its reference point.
 
 Compare runs with --split val. --split test is for the final Phase 3 score,
 once, after the model has been chosen: choosing between runs by their test
@@ -137,6 +138,9 @@ def evaluate(args):
                              "model_smape": mm["smape"], "baseline_smape": bm["smape"],
                              "model_bias": mm["bias"]})
 
+    _, mae_lo, mae_hi = bootstrap_mean(np.abs(p - y))
+    _, smape_lo, smape_hi = bootstrap_mean(smape_terms(y, p))
+
     report = {
         "name": name,
         "split": args.split,
@@ -145,6 +149,10 @@ def evaluate(args):
         "target": target,
         "train_median_price": train_median,
         "model": metrics(y, p),
+        # How much the number would move with a different draw of images.
+        "model_ci95": {"mae": [mae_lo, mae_hi], "smape": [smape_lo, smape_hi]},
+        # A raw-price head can output a negative price; the app has to handle that.
+        "negative_predictions": int((p < 0).sum()),
         "baseline_median": metrics(y, base),
         "by_price_range": by_range,
         # Relative, so --compare still finds it if the folder is moved.
@@ -159,6 +167,10 @@ def evaluate(args):
     print(f"| | {name} | median baseline (${train_median:.2f}) |\n|---|---|---|")
     for key, label in METRIC_ROWS:
         print(f"| {label} | {report['model'][key]:.3f} | {report['baseline_median'][key]:.3f} |")
+    print(f"\n95% interval for {name} (bootstrap over images): MAE ${mae_lo:.3f} to ${mae_hi:.3f}, "
+          f"SMAPE {smape_lo:.2f}% to {smape_hi:.2f}%")
+    if report["negative_predictions"]:
+        print(f"WARNING: {report['negative_predictions']} predictions are below $0")
     print("\n| Price range | n | MAE ($) | baseline MAE | SMAPE (%) | baseline SMAPE | bias ($) |")
     print("|---|---|---|---|---|---|---|")
     for r in by_range:
@@ -167,8 +179,9 @@ def evaluate(args):
     print(f"\nSaved {stem}.json and {stem}_predictions.csv")
 
 
-def paired_bootstrap(d, n_boot=2000, seed=0):
-    """95% interval for mean(d), resampling images with replacement."""
+def bootstrap_mean(d, n_boot=2000, seed=0):
+    """95% interval for mean(d), resampling images with replacement. With d =
+    per-image differences between two runs, this is a paired comparison."""
     rng = np.random.default_rng(seed)
     means = np.array([d[rng.integers(0, len(d), len(d))].mean() for _ in range(n_boot)])
     return float(d.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
@@ -214,7 +227,7 @@ def compare(json_paths):
                      f"paired bootstrap over images, 2000 resamples:\n")
         lines.append("| Metric | difference | 95% interval | reading |\n|---|---|---|---|")
         for col, label in (("abs_err", "MAE ($)"), ("smape", "SMAPE (%)")):
-            diff, lo, hi = paired_bootstrap((fb[col] - fa[col]).to_numpy())
+            diff, lo, hi = bootstrap_mean((fb[col] - fa[col]).to_numpy())
             if hi < 0:
                 reading = f"{b['name']} lower, interval excludes 0"
             elif lo > 0:
