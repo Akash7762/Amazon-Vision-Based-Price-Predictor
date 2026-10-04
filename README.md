@@ -3,11 +3,11 @@
 Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
-> **Status: in development — Phases 0–4 of 10 complete.**
-> The model is trained, tested, exported, and served by an API. On 11,028
-> held-out test images its average error is **$11.27 per product**, against
-> **$14.51** for always guessing the median price (22% lower). The API returns
-> the price with a calibrated range. See [Current status](#current-status)
+> **Status: in development — Phases 0–5 of 10 complete.**
+> Take or choose a product photo in the web app, and it shows an estimated
+> price with a calibrated range. On 11,028 held-out test images the model's
+> average error is **$11.27 per product**, against **$14.51** for always
+> guessing the median price (22% lower). See [Current status](#current-status)
 > for exactly what does and does not work today.
 
 ---
@@ -37,7 +37,7 @@ service and a Next.js PWA.
 | Training compute | Kaggle Notebooks (T4 GPU) |
 | Model export | ONNX, run with `onnxruntime` (no PyTorch needed to serve) |
 | Backend API | FastAPI + `onnxruntime` (no PyTorch) |
-| Frontend | React / Next.js, installable PWA *(Phase 5)* |
+| Frontend | Next.js 16 (React 19), installable PWA |
 | Containerization | Docker *(Phase 7)* |
 | Version control | Git + GitHub, Git LFS for weights |
 
@@ -69,7 +69,7 @@ for provenance and regeneration steps.
 ├── scripts/       # data cleaning, splitting, image download
 ├── model/         # training, evaluation, error analysis, ONNX export
 ├── backend/       # FastAPI service: /predict, /health
-├── frontend/      # Next.js PWA              (Phase 5)
+├── frontend/      # Next.js web app (installable PWA)
 ├── deploy/        # Docker + deploy config   (Phase 7)
 └── docs/          # Kaggle guide, experiment log, evaluation report
 ```
@@ -121,6 +121,12 @@ for provenance and regeneration steps.
   It checks the model's sha256 at startup, rejects bad uploads with clear
   errors (400/413/415), and has 27 tests. About 0.3 s per request on the
   development PC's CPU.
+- **Web app** — Next.js PWA in [`frontend/`](frontend/README.md). Take a
+  photo (phones) or choose, drop or paste one (desktop); it shows the price,
+  the range and a plain explanation, with clear messages when something goes
+  wrong. Installable from Chrome/Edge; after one visit it opens offline
+  (prices always come from the live model). Checked against the real model in
+  desktop and phone-sized browsers.
 
 **Known limits of the current model:**
 
@@ -140,7 +146,8 @@ for provenance and regeneration steps.
 
 **Not done yet:**
 
-- Frontend, integration, deployment (Phases 5–7)
+- Installing on a phone: needs HTTPS, which deployment (Phase 7) provides
+- End-to-end tests and deployment (Phases 6–7)
 
 ## Setup
 
@@ -192,12 +199,16 @@ python model/evaluate.py --checkpoint model/checkpoints/sanity/best.pt \
     --image-dir data/processed/images/dev --split val --out-dir model/logs/eval
 ```
 
-Run the API (after `python backend/download_model.py`; full steps in
-[`backend/README.md`](backend/README.md)), then open http://localhost:8000/docs:
+Run the app: the API first (after `python backend/download_model.py`; full
+steps in [`backend/README.md`](backend/README.md)), then the web app (steps in
+[`frontend/README.md`](frontend/README.md)), and open http://localhost:3000:
 
 ```bash
-uvicorn backend.app.main:app --reload
+uvicorn backend.app.main:app --reload       # repo root, Python venv
+cd frontend && npm install && npm run dev   # another terminal
 ```
+
+The API's own interactive docs are at http://localhost:8000/docs.
 
 Or price photos directly with the exported model. This needs only
 `onnxruntime`, `numpy` and `Pillow`, not PyTorch:
@@ -220,7 +231,7 @@ Step-by-step instructions are in
 - [x] **Phase 2** — Model design, training, and one controlled experiment
 - [x] **Phase 3** — Model evaluation, error analysis, export
 - [x] **Phase 4** — FastAPI backend
-- [ ] **Phase 5** — Next.js PWA frontend
+- [x] **Phase 5** — Next.js PWA frontend (installing on a phone waits for HTTPS in Phase 7)
 - [ ] **Phase 6** — Integration and end-to-end testing
 - [ ] **Phase 7** — Deployment
 - [ ] **Phase 8** — Documentation and repo polish
