@@ -3,12 +3,12 @@
 Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
-> **Status: in development — Phases 0–3 of 10 complete.**
-> The model is trained, tested and exported. On 11,028 held-out test images
-> its average error is **$11.27 per product**, against **$14.51** for always
-> guessing the median price (22% lower). It is exported to ONNX and runs
-> without PyTorch. See [Current status](#current-status) for exactly what
-> does and does not work today.
+> **Status: in development — Phases 0–4 of 10 complete.**
+> The model is trained, tested, exported, and served by an API. On 11,028
+> held-out test images its average error is **$11.27 per product**, against
+> **$14.51** for always guessing the median price (22% lower). The API returns
+> the price with a calibrated range. See [Current status](#current-status)
+> for exactly what does and does not work today.
 
 ---
 
@@ -36,7 +36,7 @@ service and a Next.js PWA.
 | Vision backbone | `timm` 1.0.29 — `convnext_tiny.fb_in22k_ft_in1k` |
 | Training compute | Kaggle Notebooks (T4 GPU) |
 | Model export | ONNX, run with `onnxruntime` (no PyTorch needed to serve) |
-| Backend API | FastAPI *(Phase 4)* |
+| Backend API | FastAPI + `onnxruntime` (no PyTorch) |
 | Frontend | React / Next.js, installable PWA *(Phase 5)* |
 | Containerization | Docker *(Phase 7)* |
 | Version control | Git + GitHub, Git LFS for weights |
@@ -68,7 +68,7 @@ for provenance and regeneration steps.
 ├── notebooks/     # EDA, and the Kaggle training and evaluation notebooks
 ├── scripts/       # data cleaning, splitting, image download
 ├── model/         # training, evaluation, error analysis, ONNX export
-├── backend/       # FastAPI service          (Phase 4)
+├── backend/       # FastAPI service: /predict, /health
 ├── frontend/      # Next.js PWA              (Phase 5)
 ├── deploy/        # Docker + deploy config   (Phase 7)
 └── docs/          # Kaggle guide, experiment log, evaluation report
@@ -115,6 +115,12 @@ for provenance and regeneration steps.
   development PC's CPU, without PyTorch (`model/predict_onnx.py`).
   Download it from the
   [`v0.1-model` release](https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor/releases/tag/v0.1-model).
+- **Backend API** — FastAPI service in [`backend/`](backend/README.md).
+  `POST /predict` takes a photo and returns the price with a range that held
+  79.6% of real test prices (80% target); `GET /health` reports the model.
+  It checks the model's sha256 at startup, rejects bad uploads with clear
+  errors (400/413/415), and has 27 tests. About 0.3 s per request on the
+  development PC's CPU.
 
 **Known limits of the current model:**
 
@@ -134,7 +140,7 @@ for provenance and regeneration steps.
 
 **Not done yet:**
 
-- Backend, frontend, deployment (Phases 4–7)
+- Frontend, integration, deployment (Phases 5–7)
 
 ## Setup
 
@@ -186,7 +192,14 @@ python model/evaluate.py --checkpoint model/checkpoints/sanity/best.pt \
     --image-dir data/processed/images/dev --split val --out-dir model/logs/eval
 ```
 
-Price your own product photos with the exported model. This needs only
+Run the API (after `python backend/download_model.py`; full steps in
+[`backend/README.md`](backend/README.md)), then open http://localhost:8000/docs:
+
+```bash
+uvicorn backend.app.main:app --reload
+```
+
+Or price photos directly with the exported model. This needs only
 `onnxruntime`, `numpy` and `Pillow`, not PyTorch:
 
 ```bash
@@ -206,7 +219,7 @@ Step-by-step instructions are in
 - [x] **Phase 1** — Data collection and preparation
 - [x] **Phase 2** — Model design, training, and one controlled experiment
 - [x] **Phase 3** — Model evaluation, error analysis, export
-- [ ] **Phase 4** — FastAPI backend
+- [x] **Phase 4** — FastAPI backend
 - [ ] **Phase 5** — Next.js PWA frontend
 - [ ] **Phase 6** — Integration and end-to-end testing
 - [ ] **Phase 7** — Deployment
