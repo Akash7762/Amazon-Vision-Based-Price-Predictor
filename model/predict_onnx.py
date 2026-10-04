@@ -35,12 +35,22 @@ def load_session(model_path):
     return ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
 
-def predict(session, image_path):
-    """Dollars for one photo."""
+def pixels_from_image(img, size):
+    """An opened photo -> the model's input: upright, letterboxed, (1, size, size, 3) uint8."""
+    img = ImageOps.exif_transpose(img)
+    return np.asarray(letterbox_resize(img, size), dtype=np.uint8)[None]
+
+
+def predict_image(session, img):
+    """Dollars for one opened photo (a PIL Image). The backend calls this."""
     size = session.get_inputs()[0].shape[1]  # (1, size, size, 3)
-    img = ImageOps.exif_transpose(Image.open(image_path))
-    pixels = np.asarray(letterbox_resize(img, size), dtype=np.uint8)[None]
-    return float(session.run(["price"], {"image": pixels})[0][0])
+    return float(session.run(["price"], {"image": pixels_from_image(img, size)})[0][0])
+
+
+def predict(session, image_path):
+    """Dollars for one photo on disk."""
+    with Image.open(image_path) as img:
+        return predict_image(session, img)
 
 
 def check(session, predictions_csv, image_dir, n, tolerance=0.01):
