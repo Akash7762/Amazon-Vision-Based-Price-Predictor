@@ -27,3 +27,6 @@ out/
 
 # Tooling output
 graphify-out/
+
+# Backend: the model is downloaded from the GitHub release, not committed
+backend/models/

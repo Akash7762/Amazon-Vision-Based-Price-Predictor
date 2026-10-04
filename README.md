@@ -113,6 +113,8 @@ for provenance and regeneration steps.
   the dollar conversion inside the graph. It matches PyTorch to within
   $0.0002 on 256 test images and prices a photo in about 0.1 s on the
   development PC's CPU, without PyTorch (`model/predict_onnx.py`).
+  Download it from the
+  [`v0.1-model` release](https://github.com/Akash7762/Amazon-Vision-Based-Price-Predictor/releases/tag/v0.1-model).
 
 **Known limits of the current model:**
 
@@ -132,8 +134,6 @@ for provenance and regeneration steps.
 
 **Not done yet:**
 
-- GitHub release `v0.1-model` with the model file attached (the roadmap's
-  last Phase 3 step)
 - Backend, frontend, deployment (Phases 4–7)
 
 ## Setup
