@@ -25,6 +25,24 @@ LETTERBOX_FILL = (255, 255, 255)
 RESIZE_MODE = "letterbox_pad"
 
 
+def flatten_transparency(img, fill=LETTERBOX_FILL):
+    """Put a transparent image onto a `fill`-coloured background.
+
+    A plain .convert("RGB") drops the alpha channel and keeps whatever colour
+    sits under the transparent pixels, usually black. Product PNGs are often
+    transparent around the item, and the model was trained on white-background
+    catalogue photos, so transparency becomes white. Images without
+    transparency (every cached training JPEG) are returned unchanged.
+    """
+    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if not has_alpha:
+        return img
+    rgba = img.convert("RGBA")
+    background = Image.new("RGB", rgba.size, fill)
+    background.paste(rgba, mask=rgba.getchannel("A"))
+    return background
+
+
 def letterbox_resize(img, size, fill=LETTERBOX_FILL, resample=Image.BILINEAR):
     """Resize `img` to a square `size` x `size` canvas, preserving aspect ratio.
 
@@ -33,7 +51,8 @@ def letterbox_resize(img, size, fill=LETTERBOX_FILL, resample=Image.BILINEAR):
     this does not distort proportions.
 
     Args:
-        img: a PIL Image (any mode; converted to RGB).
+        img: a PIL Image (any mode; converted to RGB). Transparent areas are
+            filled with `fill` first.
         size: target square edge length in pixels.
         fill: RGB tuple for the padding colour.
         resample: PIL resampling filter.
@@ -41,6 +60,7 @@ def letterbox_resize(img, size, fill=LETTERBOX_FILL, resample=Image.BILINEAR):
     Returns:
         A new RGB PIL Image of exactly (size, size).
     """
+    img = flatten_transparency(img, fill)
     img = img.convert("RGB")
     w, h = img.size
     if w <= 0 or h <= 0:
