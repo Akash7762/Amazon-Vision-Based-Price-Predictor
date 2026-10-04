@@ -59,4 +59,71 @@ runs without importing PyTorch.
 
 ## Results
 
-*Pending: filled in from Notebook C's output.*
+From Notebook C on Kaggle (CPU), Oct 4 2026. Scoring the 11,028 test images
+took 27 minutes.
+
+### 1. The test score
+
+**Test MAE $11.27** (95% interval $10.99 to $11.56), against $14.51 for
+always guessing the median price on the same images: **22% lower**. The
+median error is $5.74 against $8.71 (34% lower).
+
+| | median baseline (test) | run1, val (used for choosing) | **run1, test** |
+|---|---|---|---|
+| MAE ($) | 14.508 | 11.233 | **11.268** |
+| RMSE ($) | 23.657 | 19.280 | 19.161 |
+| Median abs error ($) | 8.710 | 5.713 | 5.737 |
+| SMAPE (%) | 70.516 | 53.513 | 53.986 |
+| Bias ($) | -7.760 | -4.345 | -4.273 |
+
+**Val and test agree.** Test MAE is $0.04 above val, far inside the test
+interval. Choosing the epoch and the run on val didn't flatter the val
+number by any amount we can measure, so the val results in
+[`experiments.md`](experiments.md) were a fair guide.
+
+By price range, on test:
+
+| Price range | n | MAE ($) | baseline MAE | SMAPE (%) | baseline SMAPE | bias ($) |
+|---|---|---|---|---|---|---|
+| $0-5 | 1841 | 5.83 | 10.67 | 72.8 | 124.4 | +5.67 |
+| $5-10 | 2326 | 5.36 | 6.45 | 45.5 | 61.1 | +4.14 |
+| $10-20 | 2913 | 6.11 | 2.51 | 39.0 | 17.1 | +0.99 |
+| $20-50 | 2844 | 13.16 | 17.61 | 53.5 | 73.3 | -8.99 |
+| $50+ | 1104 | 41.53 | 61.54 | 81.1 | 133.9 | -40.33 |
+
+**The model hedges toward typical prices.** Items under $5 are guessed too
+high by $5.67 on average, which is 97% of their error. Items over $50 are
+guessed too low by $40.33, also 97% of their error. In the $10-20 range,
+always guessing $14 beats the model (2.51 vs 6.11), because $14 sits inside
+that range; the model gives that back many times over at both ends. This is
+the same pattern run2 showed on val, now confirmed for run1 on test.
+
+No prediction was below $0; 8 were below $1. A raw-price head can still
+produce a negative price for an unusual photo, so the Phase 4 backend should
+clamp its output anyway.
+
+### 2. The pack-size check
+
+**Multipacks are guessed 4.5% lower than single items at the same price
+level** (95% interval -7.0% to -1.9%). By the rule written before the run,
+the interval is entirely below 0: **consistent with the photo not showing
+the pack size.**
+
+It is also **small**. A 4.5% shift is little next to a typical miss of
+about 54% (SMAPE). Pack size is one of the things the photo misses, but
+not the main reason for the error. The main reason is the hedging above:
+from a photo alone, the model can't tell expensive items from mid-priced
+ones well enough to commit to a high or low price.
+
+### 3. The export
+
+| | |
+|---|---|
+| File | `price_model.onnx`, 111.8 MB, one file |
+| sha256 | `b7055048f0f059789f740e121c7b739c67b2269845c2e90814273f6cccebf984` |
+| Exporter | PyTorch's current (dynamo) exporter |
+| ONNX vs PyTorch, 256 test images | max difference **$0.000179**, mean $0.000067: **passed** (limit $0.01) |
+| `predict_onnx.py` (no PyTorch) vs Cell 4, 8 test images | all 8 match, largest difference $0.0001: **passed** |
+
+Both acceptance checks set in the plan passed, so `price_model.onnx` is the
+model the Phase 4 backend will serve.
