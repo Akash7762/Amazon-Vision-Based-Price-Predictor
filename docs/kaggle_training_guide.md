@@ -1,18 +1,21 @@
-# Kaggle Training Guide — Phase 2 end to end
+# Kaggle Guide — Phases 2 and 3
 
-This covers all of Phase 2 on Kaggle, starting from a fresh notebook: download
-the images, train, and decide which checkpoint goes to Phase 3.
+This covers the Kaggle side of Phase 2 (download the images, train, choose a
+checkpoint) and Phase 3 (score the chosen model on the test split, analyse
+its errors, export it).
 
 The first real model, run1, was trained on Oct 1 (val MAE well below the
 median-price baseline). Results for every run are in
-[`experiments.md`](experiments.md).
+[`experiments.md`](experiments.md); Phase 3 results are in
+[`evaluation.md`](evaluation.md).
 
-It uses two notebooks:
+It uses three notebooks:
 
 | Notebook | Job | Accelerator | Output |
 |---|---|---|---|
 | **A — Download** | fetch and resize ~73.5k images | **None (CPU)** | `images.zip`, made into a Dataset |
 | **B — Train** | train one run, score it on val, compare with an earlier run | **GPU** | `best.pt`, `history.json`, `eval/` metrics |
+| **C — Phase 3** | test score, error analysis, ONNX export | **None (CPU)** | `phase3/`: test metrics, figures, `price_model.onnx` |
 
 Downloading needs no GPU. Running it in a GPU session uses up your weekly GPU
 quota while the notebook waits on the network.
@@ -382,6 +385,63 @@ get, so spend them where the curve points.
 **Phase 2 is done when** you can say why the checkpoint you kept is the one
 you kept, from numbers you'd defend in the viva. Then Phase 3 scores it once
 on the test split.
+
+---
+
+## Notebook C — Phase 3: test score, error analysis, export (CPU)
+
+The cells live in [`notebooks/kaggle_phase3.ipynb`](../notebooks/kaggle_phase3.ipynb).
+It needs **no GPU**: scoring 11,028 test images on CPU takes 10–20 minutes,
+so there's no GPU queue and no weekly GPU hours used.
+
+| Cell | What it does | Time on CPU |
+|---|---|---|
+| 0 | settings: model name, checkpoint ("auto"), run1's val numbers for comparison | — |
+| 1 | prints the environment | seconds |
+| 2 | clones `feature/model-evaluation`, refuses old code, installs timm + onnx + onnxruntime + onnxscript | ~1 min |
+| 3 | data paths, image check, finds the one attached `checkpoints/best.pt` | ~1 min |
+| 4 | **the test score**, once, with a 95% interval, next to the val numbers | 10–20 min |
+| 5 | error analysis: predicted-vs-actual chart, worst-prediction photos, pack-size check | ~1 min |
+| 6 | ONNX export, checked against PyTorch on 256 test images | 2–3 min |
+| 7 | re-prices 8 test photos with only onnxruntime (the backend's route) and checks they match Cell 4 | seconds |
+| 8 | lists the files to download | seconds |
+
+### C0. Before you start
+
+1. On your PC: push `feature/model-evaluation`, so the notebook can clone it.
+2. Make sure run1's output exists as a Dataset (`amazon-price-run1`).
+
+### C1. Create the notebook
+
+1. **Create → New Notebook** → **File → Import Notebook** → upload
+   `notebooks/kaggle_phase3.ipynb`.
+2. Session options: Accelerator **None**, Internet **On**.
+3. **Add Input**: `amazon-price-metadata`, `amazon-price-images-v2`,
+   `amazon-price-run1`. **Only run1's output**, not run2's: Cell 3 stops if
+   it finds more than one `best.pt`.
+
+### C2. Rehearse Cells 0–3, then save
+
+| Cell | Good output |
+|---|---|
+| 2 | `code is up to date`, then `torch ... \| timm ... \| onnx ... \| onnxruntime ...` |
+| 3 | `images=73517 missing=0`, one checkpoint path, and `epoch 14, target price` |
+
+Then **Save Version → Save & Run All (Commit)**, Advanced: always save output.
+About 20–30 minutes in total. When it finishes, download the `phase3/`
+folder from the Output tab (about 113 MB, almost all of it the `.onnx`
+file), and make the output a Dataset (`amazon-price-phase3`) so Phase 4 can
+attach the model.
+
+### C3. What the cells print, and what to check
+
+- **Cell 4:** the val-vs-test table and the test MAE with its 95% interval.
+  This is the number for the report.
+- **Cell 5:** the pack-size check ends with a "Reading:" line. The rule for
+  reading it is in [`evaluation.md`](evaluation.md), written before the run.
+- **Cell 6:** must end with `PASSED`. If it says `FAILED`, the exported model
+  disagrees with PyTorch, and it must not be used.
+- **Cell 7:** must end with `All 8 match`.
 
 ---
 
