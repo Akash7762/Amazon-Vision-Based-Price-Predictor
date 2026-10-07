@@ -1,0 +1,34 @@
+{
+  "model_version": "v0.1-model",
+  "model_sha256": "b7055048f0f059789f740e121c7b739c67b2269845c2e90814273f6cccebf984",
+  "range_coverage": 0.8,
+  "photos": [
+    {
+      "file": "mustard.jpg",
+      "product": "French's Honey Dijon mustard, 12 oz",
+      "sample_id": 34988,
+      "listed_price": 3.24,
+      "price": 3.23,
+      "low": 1.83,
+      "high": 18.15
+    },
+    {
+      "file": "olive-oil.jpg",
+      "product": "Filippo Berio extra virgin olive oil, 750 ml",
+      "sample_id": 298607,
+      "listed_price": 10.97,
+      "price": 10.7,
+      "low": 4.46,
+      "high": 29.43
+    },
+    {
+      "file": "garlic.jpg",
+      "product": "Rani organic ground garlic, 16 oz",
+      "sample_id": 217731,
+      "listed_price": 19.99,
+      "price": 19.71,
+      "low": 7.18,
+      "high": 44.88
+    }
+  ]
+}
