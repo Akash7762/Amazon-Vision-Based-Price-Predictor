@@ -16,7 +16,9 @@ import io
 
 from PIL import Image, UnidentifiedImageError
 
-ALLOWED_FORMATS = ("JPEG", "PNG", "WEBP")
+# MPO is a JPEG that carries extra images, such as the depth or HDR maps some
+# phone cameras add. Pillow opens the main photo, which is all the model needs.
+ALLOWED_FORMATS = ("JPEG", "MPO", "PNG", "WEBP")
 # Some clients send a generic type or "image/jpg"; the decoded format is checked anyway.
 ALLOWED_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "application/octet-stream"}
 SEND_THIS = "Send a JPEG, PNG or WebP photo."

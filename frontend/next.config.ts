@@ -11,6 +11,17 @@ const nextConfig: NextConfig = {
   // Don't let `next dev` write AI-agent instruction files into the project.
   agentRules: false,
 
+  // The end-to-end tests (e2e/) build into their own folder, so running them
+  // never touches the build of an app you already have running.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  experimental: {
+    // How much of a request body Next.js passes on to the API. It has to be
+    // more than anything the API accepts (10 MB plus the form around it), or a
+    // photo near the limit is cut short; proxy.ts refuses anything bigger.
+    proxyClientMaxBodySize: "11mb",
+  },
+
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API_URL}/:path*` }];
   },

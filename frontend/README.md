@@ -9,7 +9,7 @@ with its range, from the [backend API](../backend/README.md).
 The backend has to be running first (see [`backend/README.md`](../backend/README.md)):
 
 ```bash
-uvicorn backend.app.main:app            # from the repo root, in the Python venv
+uvicorn backend.app.main:app --timeout-keep-alive 75   # repo root, Python venv
 ```
 
 Then, in another terminal:
@@ -34,6 +34,12 @@ The browser only ever talks to this app. Requests to `/api/...` are forwarded
 by Next.js to the backend (`next.config.ts`), so there's no CORS to set up,
 and a phone or an HTTPS tunnel only needs to reach one address.
 
+Uploads over the API's 10 MB limit are refused before they're forwarded
+(`proxy.ts`), and the app checks the size before uploading at all. Next.js
+passes on only part of a request body that big, which left the API's
+connection out of step and failed the next request (Phase 6, bug 3 in
+[`docs/testing.md`](../docs/testing.md)).
+
 | Setting | Default | When it's read |
 |---|---|---|
 | `API_URL` | `http://localhost:8000` | when `npm run dev` starts, or at `npm run build` |
@@ -47,6 +53,7 @@ See [`.env.example`](.env.example). Put overrides in `.env.local` (not committed
 | `components/PricePredictor.tsx` | the screen: choose or take a photo, the result, errors |
 | `lib/image.ts` | shrinks big photos to 1600 px JPEG before upload; small JPEG/PNG/WebP files go as they are |
 | `lib/api.ts` | calls `/api/predict` and `/api/health`, and turns failures into plain messages |
+| `lib/limits.ts`, `proxy.ts` | the 10 MB upload limit, checked in the browser and before forwarding |
 | `app/manifest.ts` | the web app manifest (name, icons, colours) that makes it installable |
 | `public/sw.js` | the service worker: the app opens offline; prices are never cached |
 | `components/ServiceWorkerRegistration.tsx` | registers the worker (production builds only) |
@@ -102,5 +109,6 @@ In a Chromium browser, against the real model:
 - offline: after one visit, with the server stopped, the app still opens
   fully styled and working, and says the price service is unreachable
 
-Not yet automated: these checks are manual. End-to-end tests belong to
-Phase 6.
+Phase 6 turned all of these into automated end-to-end tests, in desktop
+Chrome, desktop Edge and an emulated Android phone: see [`e2e/`](../e2e/README.md)
+and [`docs/testing.md`](../docs/testing.md).

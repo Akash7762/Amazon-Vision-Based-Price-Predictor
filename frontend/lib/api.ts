@@ -1,4 +1,5 @@
 // Talks to the backend through this app's /api/... route (see next.config.ts).
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from "@/lib/limits";
 
 export type Prediction = {
   price: number;
@@ -33,6 +34,12 @@ function kindForStatus(status: number): FailureKind {
 }
 
 export async function predictPrice(image: Blob, filename: string, timeoutMs = 30_000): Promise<Prediction> {
+  // Only a file the browser couldn't shrink gets here this big (lib/image.ts).
+  // Say so now rather than after uploading 10 MB the API would refuse.
+  if (image.size > MAX_UPLOAD_BYTES) {
+    throw new PredictionError("too_large", `That file is larger than ${MAX_UPLOAD_MB} MB. Try a smaller photo.`);
+  }
+
   const form = new FormData();
   form.append("file", image, filename);
   const controller = new AbortController();

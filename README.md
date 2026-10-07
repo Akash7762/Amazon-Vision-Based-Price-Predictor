@@ -3,12 +3,13 @@
 Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
-> **Status: in development — Phases 0–5 of 10 complete.**
+> **Status: in development — Phases 0–6 of 10 complete.**
 > Take or choose a product photo in the web app, and it shows an estimated
 > price with a calibrated range. On 11,028 held-out test images the model's
 > average error is **$11.27 per product**, against **$14.51** for always
-> guessing the median price (22% lower). See [Current status](#current-status)
-> for exactly what does and does not work today.
+> guessing the median price (22% lower). The whole app is tested end to end
+> in desktop and phone browsers. See [Current status](#current-status) for
+> exactly what does and does not work today.
 
 ---
 
@@ -70,8 +71,9 @@ for provenance and regeneration steps.
 ├── model/         # training, evaluation, error analysis, ONNX export
 ├── backend/       # FastAPI service: /predict, /health
 ├── frontend/      # Next.js web app (installable PWA)
+├── e2e/           # end-to-end tests (Playwright) and the test photos
 ├── deploy/        # Docker + deploy config   (Phase 7)
-└── docs/          # Kaggle guide, experiment log, evaluation report
+└── docs/          # Kaggle guide, experiment log, evaluation and test reports
 ```
 
 ## Current status
@@ -119,14 +121,19 @@ for provenance and regeneration steps.
   `POST /predict` takes a photo and returns the price with a range that held
   79.6% of real test prices (80% target); `GET /health` reports the model.
   It checks the model's sha256 at startup, rejects bad uploads with clear
-  errors (400/413/415), and has 27 tests. About 0.3 s per request on the
-  development PC's CPU.
+  errors (400/413/415), and has 54 tests, 23 of them with the real model.
+  About 0.1 s per request on the development PC's CPU.
 - **Web app** — Next.js PWA in [`frontend/`](frontend/README.md). Take a
   photo (phones) or choose, drop or paste one (desktop); it shows the price,
   the range and a plain explanation, with clear messages when something goes
   wrong. Installable from Chrome/Edge; after one visit it opens offline
-  (prices always come from the live model). Checked against the real model in
-  desktop and phone-sized browsers.
+  (prices always come from the live model).
+- **End-to-end tests** — 34 Playwright tests in [`e2e/`](e2e/README.md) run
+  the real app in desktop Chrome, desktop Edge and an emulated Android phone:
+  real product photos priced exactly as the Phase 3 reference code prices
+  them, failures, layouts from 320 to 1920 px, accessibility (no WCAG 2.2 AA
+  issues), installability and offline start. They found 6 bugs, all fixed.
+  Report: [`docs/testing.md`](docs/testing.md).
 
 **Known limits of the current model:**
 
@@ -144,10 +151,16 @@ for provenance and regeneration steps.
 - Validation error stops improving after 2–4 epochs while training error
   keeps falling: the model memorises the training images.
 
+- **It reacts to how a product is turned.** On its side, a product can get
+  twice its upright price, so the app asks for upright photos. Phone photos'
+  rotation tags are applied first, so they are turned upright.
+
 **Not done yet:**
 
+- Checks on a real phone (camera, phone browsers): the checklist in
+  [`docs/testing.md`](docs/testing.md#2-cross-platform-mobile-and-desktop-parity)
 - Installing on a phone: needs HTTPS, which deployment (Phase 7) provides
-- End-to-end tests and deployment (Phases 6–7)
+- Deployment (Phase 7)
 
 ## Setup
 
@@ -204,7 +217,7 @@ steps in [`backend/README.md`](backend/README.md)), then the web app (steps in
 [`frontend/README.md`](frontend/README.md)), and open http://localhost:3000:
 
 ```bash
-uvicorn backend.app.main:app --reload       # repo root, Python venv
+uvicorn backend.app.main:app --reload --timeout-keep-alive 75   # repo root, Python venv
 cd frontend && npm install && npm run dev   # another terminal
 ```
 
@@ -213,6 +226,13 @@ browser, and stops both when you press Q or close its window
 (`start-app.bat -CreateShortcut` adds a desktop icon for it).
 
 The API's own interactive docs are at http://localhost:8000/docs.
+
+Run the tests (details in [`docs/testing.md`](docs/testing.md)):
+
+```bash
+python -m pytest                              # backend and model, repo root
+cd e2e && npm install && npx playwright test  # the whole app, in Chrome, Edge and an emulated phone
+```
 
 Or price photos directly with the exported model. This needs only
 `onnxruntime`, `numpy` and `Pillow`, not PyTorch:
@@ -236,7 +256,7 @@ Step-by-step instructions are in
 - [x] **Phase 3** — Model evaluation, error analysis, export
 - [x] **Phase 4** — FastAPI backend
 - [x] **Phase 5** — Next.js PWA frontend (installing on a phone waits for HTTPS in Phase 7)
-- [ ] **Phase 6** — Integration and end-to-end testing
+- [x] **Phase 6** — Integration and end-to-end testing (real-phone checks: the checklist in `docs/testing.md`)
 - [ ] **Phase 7** — Deployment
 - [ ] **Phase 8** — Documentation and repo polish
 - [ ] **Phase 9** — Final presentation

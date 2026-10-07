@@ -3,7 +3,9 @@ Amazon Vision Price Predictor API (Phase 4).
 
 Run from the repo root (so `model/` is importable):
 
-    uvicorn backend.app.main:app --reload
+    uvicorn backend.app.main:app --reload --timeout-keep-alive 75
+
+(--timeout-keep-alive: see backend/README.md, "Run".)
 
     GET  /health    is the model loaded, which version
     POST /predict   multipart upload, field "file": a product photo
@@ -74,8 +76,10 @@ def create_app(settings=None):
     def root():
         return {"name": app.title, "docs": "/docs", "health": "/health", "predict": "POST /predict"}
 
+    # async, so it runs on the event loop and answers at once even while every
+    # worker thread is busy pricing photos (the web app checks it on page load).
     @app.get("/health", response_model=Health)
-    def health(request: Request):
+    async def health(request: Request):
         p = request.app.state.predictor
         return Health(status="ok", model_version=p.version, model_sha256=p.sha256,
                       input_size=p.input_size, range_coverage=p.calibration["coverage"])
