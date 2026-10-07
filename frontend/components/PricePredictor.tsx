@@ -30,9 +30,14 @@ export function PricePredictor() {
   const [serviceDown, setServiceDown] = useState(false);
   const [dragging, setDragging] = useState(false);
   const previewUrl = useRef<string | null>(null);
+  const uploaded = useRef(false);
 
   useEffect(() => {
-    serviceIsUp().then((up) => setServiceDown(!up));
+    // If an upload has finished by the time this first check answers, the
+    // upload's outcome is the newer news, so the check doesn't override it.
+    serviceIsUp().then((up) => {
+      if (!uploaded.current) setServiceDown(!up);
+    });
     return () => {
       if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
     };
@@ -46,9 +51,11 @@ export function PricePredictor() {
     try {
       const image = await prepareImage(file);
       const result = await predictPrice(image, uploadName(file, image));
+      uploaded.current = true;
       setServiceDown(false);
       setState({ step: "done", preview, result });
     } catch (err) {
+      uploaded.current = true;
       const known = err instanceof PredictionError;
       if (known && err.kind === "unavailable") setServiceDown(true);
       setState({
@@ -107,7 +114,8 @@ export function PricePredictor() {
           onDrop={onDrop}
         >
           <p className={styles.dropTitle}>Add a product photo</p>
-          <p className={styles.hint}>One item, in good light, works best.</p>
+          {/* Upright matters: lying on its side, a product can get twice the price (Phase 6). */}
+          <p className={styles.hint}>One item, upright, in good light, works best.</p>
           <div className={styles.actions}>
             {/* Labels open the file inputs natively, which works everywhere, iOS included. */}
             <label className={`${styles.button} ${styles.cameraButton}`}>
