@@ -90,7 +90,7 @@ function Test-BuildStale {
     $dirs = "app", "components", "lib", "public" | ForEach-Object { Join-Path $frontend $_ }
     $files = @(Get-ChildItem $dirs -Recurse -File -ErrorAction SilentlyContinue)
     $files += Get-ChildItem $frontend -File | Where-Object {
-        ($_.Name -in "next.config.ts", "package.json", "package-lock.json", "tsconfig.json") -or ($_.Name -like ".env*")
+        ($_.Name -in "next.config.ts", "proxy.ts", "package.json", "package-lock.json", "tsconfig.json") -or ($_.Name -like ".env*")
     }
     $newest = ($files | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
     $newest -gt (Get-Item $id).LastWriteTime
