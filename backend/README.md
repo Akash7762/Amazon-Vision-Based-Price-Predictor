@@ -41,8 +41,15 @@ python backend/download_model.py --from-file path/to/price_model.onnx
 From the **repo root** (the API imports the shared image code in `model/`):
 
 ```bash
-uvicorn backend.app.main:app --reload
+uvicorn backend.app.main:app --reload --timeout-keep-alive 75
 ```
+
+`--timeout-keep-alive 75` keeps idle connections open longer than anything
+in front of the API does: Next.js (Node.js) drops them after 5 s, cloud load
+balancers usually after 60 s. With uvicorn's default of 5 s both ends closed
+at the same moment, and now and then the web app sent a request down a
+connection that was just being closed: 8 of 432 requests failed with a 500
+in a Phase 6 stress test, none with 75 s.
 
 Then open http://localhost:8000/docs to try it in the browser: expand
 `POST /predict`, click **Try it out**, choose a photo, **Execute**.
@@ -136,12 +143,20 @@ Environment variables, all optional:
 python -m pytest
 ```
 
-27 tests, about 2 seconds. They use a tiny stand-in model with the real
-model's inputs and outputs (`tests/conftest.py`), so they don't need the
-112 MB file. They cover the answers, every rejection, CORS, the startup
-checks, image handling and the price range. Each of the three subtlest ones
-(transparent PNGs, phone-photo rotation, CORS on error responses) was
-checked by breaking the behaviour and watching the test fail.
+54 tests, about 6 seconds.
+
+- **31 use a tiny stand-in model** with the real model's inputs and outputs
+  (`tests/conftest.py`), so they run without the 112 MB file. They cover the
+  answers, every rejection, CORS, the startup checks, image handling and the
+  price range. Each of the subtlest ones (transparent PNGs, phone-photo
+  rotation, CORS on error responses, multi-picture JPEGs, 16-bit greyscale)
+  was checked by breaking the behaviour and watching the test fail.
+- **23 use the real model** (`tests/test_real_model.py`, skipped until it's
+  downloaded): three test photos get exactly the answers the Phase 3
+  reference code gives, the same pixels get the same price in every format,
+  and 15 unusual images all get a valid answer. See
+  [`docs/testing.md`](../docs/testing.md), which also covers the end-to-end
+  tests.
 
 ## Design notes
 
@@ -157,11 +172,17 @@ checked by breaking the behaviour and watching the test fail.
   that range.
 - **Transparent PNGs get a white background**, like the catalogue photos the
   model learned from (a plain RGB conversion would make them black).
+  16-bit greyscale is scaled down to 8 bits (a plain conversion clips it to
+  white), and JPEGs carrying extra images (MPO) are read as their main photo.
 - **Large uploads are refused early**: by `Content-Length` before the body
   is read, and by pixel count before an image is decoded.
 - **Inference runs in a worker thread** (`/predict` is a plain `def`), so one
-  slow request doesn't block others. On the development PC (CPU): about
-  0.3 s per request, about 2 requests a second with 8 at once.
+  slow request doesn't block others. On the development PC (CPU): a median
+  95 ms per photo through the web app, one at a time (Phase 6); about 2
+  requests a second with 8 at once (Phase 4).
+- **`/health` doesn't queue behind them** (it's `async`): with 48 uploads
+  running it answers in a median 44 ms, against 592 ms when it shared the
+  worker threads.
 
 ## Known limits
 
