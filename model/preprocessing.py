@@ -25,6 +25,18 @@ LETTERBOX_FILL = (255, 255, 255)
 RESIZE_MODE = "letterbox_pad"
 
 
+def to_8bit(img):
+    """Scale 16-bit greyscale (Pillow modes I;16 and I) down to ordinary 8-bit.
+
+    A plain .convert("RGB") clips these values at 255 instead of scaling them,
+    so a 16-bit greyscale PNG came out almost pure white. Every other mode,
+    the training JPEGs included, is returned unchanged.
+    """
+    if img.mode != "I" and not img.mode.startswith("I;16"):
+        return img
+    return img.convert("I").point(lambda v: v * (1 / 257)).convert("L")
+
+
 def flatten_transparency(img, fill=LETTERBOX_FILL):
     """Put a transparent image onto a `fill`-coloured background.
 
@@ -52,7 +64,7 @@ def letterbox_resize(img, size, fill=LETTERBOX_FILL, resample=Image.BILINEAR):
 
     Args:
         img: a PIL Image (any mode; converted to RGB). Transparent areas are
-            filled with `fill` first.
+            filled with `fill` first, and 16-bit greyscale is scaled to 8-bit.
         size: target square edge length in pixels.
         fill: RGB tuple for the padding colour.
         resample: PIL resampling filter.
@@ -60,7 +72,7 @@ def letterbox_resize(img, size, fill=LETTERBOX_FILL, resample=Image.BILINEAR):
     Returns:
         A new RGB PIL Image of exactly (size, size).
     """
-    img = flatten_transparency(img, fill)
+    img = flatten_transparency(to_8bit(img), fill)
     img = img.convert("RGB")
     w, h = img.size
     if w <= 0 or h <= 0:

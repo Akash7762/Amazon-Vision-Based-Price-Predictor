@@ -1,4 +1,5 @@
 """API tests against the stand-in model (see conftest.py)."""
+import io
 import json
 
 import pytest
@@ -57,6 +58,15 @@ def test_transparent_png_gets_a_white_background(client):
 def test_webp_is_accepted(client):
     webp = image_bytes(Image.new("RGB", (100, 100), (255, 255, 255)), "WEBP", lossless=True)
     assert post(client, webp, "photo.webp", "image/webp").json()["price"] == 25.5
+
+
+def test_jpeg_with_extra_images_is_accepted(client):
+    # Pillow calls a JPEG carrying extra images (a depth or HDR map, as some
+    # phone cameras add) "MPO". The main photo is the first one.
+    white = Image.new("RGB", (100, 100), (255, 255, 255))
+    mpo = image_bytes(white, "MPO", save_all=True, append_images=[Image.new("RGB", (50, 50))])
+    assert Image.open(io.BytesIO(mpo)).format == "MPO"
+    assert post(client, mpo, "photo.jpg", "image/jpeg").json()["price"] == 25.5
 
 
 def test_large_photo_is_letterboxed(client):

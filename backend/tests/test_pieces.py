@@ -44,6 +44,13 @@ def test_letterbox_leaves_plain_photos_alone():
     assert np.array_equal(np.asarray(letterbox_resize(img, 224)), np.asarray(expected))
 
 
+@pytest.mark.parametrize("dtype", ["<u2", ">u2", "<i4"])  # Pillow modes I;16, I;16B, I
+def test_16bit_greyscale_is_scaled_not_clipped(dtype):
+    # Mid-grey in 16 bits is 128 * 257. Clipped at 255 it would turn white.
+    img = Image.fromarray(np.full((200, 300), 128 * 257, dtype=dtype))
+    assert tuple(letterbox_resize(img, 224).getpixel((112, 112))) == (128, 128, 128)
+
+
 def test_read_upload_caps_bodies_without_content_length():
     with pytest.raises(UploadError) as e:
         read_upload(io.BytesIO(b"x" * 101), max_bytes=100)
