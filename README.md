@@ -208,6 +208,10 @@ uvicorn backend.app.main:app --reload       # repo root, Python venv
 cd frontend && npm install && npm run dev   # another terminal
 ```
 
+On Windows, double-click `start-app.bat` instead: it starts both, opens the
+browser, and stops both when you press Q or close its window
+(`start-app.bat -CreateShortcut` adds a desktop icon for it).
+
 The API's own interactive docs are at http://localhost:8000/docs.
 
 Or price photos directly with the exported model. This needs only
