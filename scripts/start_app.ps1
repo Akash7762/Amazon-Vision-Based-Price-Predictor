@@ -119,7 +119,7 @@ if (-not $apiUp) {
         if ($LASTEXITCODE -ne 0) { Fail "Couldn't download the model; see the message above, and backend\README.md." }
     }
     Write-Host "  Starting the price model..."
-    $api = Start-Server $root "venv\Scripts\python.exe -m uvicorn backend.app.main:app --port 8000" $apiLog
+    $api = Start-Server $root "venv\Scripts\python.exe -m uvicorn backend.app.main:app --port 8000 --timeout-keep-alive 75" $apiLog
 }
 
 if (-not $webUp) {
