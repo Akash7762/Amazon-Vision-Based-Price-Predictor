@@ -1,0 +1,14 @@
+# Keeps local builds small; deploy/api.Dockerfile copies only what the API needs.
+.git
+venv
+.venv
+**/__pycache__
+**/node_modules
+data
+logs
+graphify-out
+backend/models
+frontend/.next
+frontend/.next-e2e
+e2e/test-results
+e2e/playwright-report
