@@ -1,0 +1,45 @@
+{
+  "file": "price_model.onnx",
+  "sha256": "b7055048f0f059789f740e121c7b739c67b2269845c2e90814273f6cccebf984",
+  "size_mb": 111.8,
+  "exporter": "dynamo",
+  "opset": 20,
+  "versions": {
+    "torch": "2.11.0+cpu",
+    "onnx": "1.22.0",
+    "onnxruntime": "1.30.0"
+  },
+  "source_checkpoint": "/kaggle/input/datasets/akashverma7762/amazon-price-run1/checkpoints/best.pt",
+  "epoch": 14,
+  "target": "price",
+  "backbone": "convnext_tiny.fb_in22k_ft_in1k",
+  "input": {
+    "name": "image",
+    "dtype": "uint8",
+    "shape": [
+      1,
+      224,
+      224,
+      3
+    ],
+    "layout": "NHWC, RGB",
+    "preprocessing": "model.preprocessing.letterbox_resize(img, 224): keep the aspect ratio, pad to a square with white"
+  },
+  "output": {
+    "name": "price",
+    "dtype": "float32",
+    "shape": [
+      1
+    ],
+    "units": "USD"
+  },
+  "verification": {
+    "split": "test",
+    "n_images": 256,
+    "max_abs_diff_usd": 0.000179290771484375,
+    "mean_abs_diff_usd": 6.707978900521994e-05,
+    "max_rel_diff": 0.00029558832099772715,
+    "tolerance_usd": 0.01,
+    "passed": true
+  }
+}

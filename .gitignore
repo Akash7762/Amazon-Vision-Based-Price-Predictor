@@ -27,3 +27,9 @@ out/
 
 # Tooling output
 graphify-out/
+
+# Server logs from start-app.bat
+/logs/
+
+# Backend: the model is downloaded from the GitHub release, not committed
+backend/models/
