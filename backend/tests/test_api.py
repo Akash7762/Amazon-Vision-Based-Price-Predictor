@@ -1,11 +1,13 @@
 """API tests against the stand-in model (see conftest.py)."""
 import io
 import json
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from backend.app.config import Settings
 from backend.app.main import create_app
 from backend.tests.conftest import image_bytes
 
@@ -151,6 +153,16 @@ def test_size_error_still_carries_cors_headers(client):
     r = post(client, b"\xff" * (2 * 1024 * 1024), "big.jpg", "image/jpeg", headers={"Origin": ORIGIN})
     assert r.status_code == 413
     assert r.headers.get("access-control-allow-origin") == ORIGIN
+
+
+# --- settings ----------------------------------------------------------------------
+
+def test_thread_setting_reaches_onnxruntime(settings, monkeypatch):
+    monkeypatch.setenv("ORT_THREADS", "1")
+    assert Settings.from_env().ort_threads == 1
+    with TestClient(create_app(replace(settings, ort_threads=1))) as c:
+        session = c.app.state.predictor.session
+        assert session.get_session_options().intra_op_num_threads == 1
 
 
 # --- startup checks ----------------------------------------------------------------
