@@ -14,6 +14,14 @@ type State =
 // Failures where sending the same photo again can help.
 const RETRYABLE: FailureKind[] = ["unavailable", "offline", "timeout"];
 
+// The deployed API runs on a free server that sleeps when nobody has used it
+// for a while, and takes up to a minute to wake. Checks wait that long, and
+// say what's going on instead of looking stuck.
+type Service = "ok" | "waking" | "down";
+const SERVICE_WAIT_MS = 90_000;
+const WAKING_NOTE_AFTER_MS = 4_000;
+const SLOW_NOTE_AFTER_MS = 8_000;
+
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 // Where the estimate sits inside its range, 0 to 1. On a log scale, because
@@ -27,21 +35,30 @@ function positionInRange({ price, range: { low, high } }: Prediction): number {
 
 export function PricePredictor() {
   const [state, setState] = useState<State>({ step: "choose" });
-  const [serviceDown, setServiceDown] = useState(false);
+  const [service, setService] = useState<Service>("ok");
   const [dragging, setDragging] = useState(false);
   const previewUrl = useRef<string | null>(null);
-  const uploaded = useRef(false);
+  // Counts what has been learned about the service. A check only reports if
+  // nothing newer arrived while it waited: an upload that finished in the
+  // meantime knows better.
+  const news = useRef(0);
+
+  const checkService = useCallback(async () => {
+    const mine = ++news.current;
+    const slow = setTimeout(() => {
+      if (news.current === mine) setService("waking");
+    }, WAKING_NOTE_AFTER_MS);
+    const up = await serviceIsUp(SERVICE_WAIT_MS);
+    clearTimeout(slow);
+    if (news.current === mine) setService(up ? "ok" : "down");
+  }, []);
 
   useEffect(() => {
-    // If an upload has finished by the time this first check answers, the
-    // upload's outcome is the newer news, so the check doesn't override it.
-    serviceIsUp().then((up) => {
-      if (!uploaded.current) setServiceDown(!up);
-    });
+    checkService();
     return () => {
       if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
     };
-  }, []);
+  }, [checkService]);
 
   const estimate = useCallback(async (file: File) => {
     if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
@@ -51,13 +68,15 @@ export function PricePredictor() {
     try {
       const image = await prepareImage(file);
       const result = await predictPrice(image, uploadName(file, image));
-      uploaded.current = true;
-      setServiceDown(false);
+      news.current++;
+      setService("ok");
       setState({ step: "done", preview, result });
     } catch (err) {
-      uploaded.current = true;
       const known = err instanceof PredictionError;
-      if (known && err.kind === "unavailable") setServiceDown(true);
+      if (known && err.kind === "unavailable") {
+        news.current++;
+        setService("down");
+      }
       setState({
         step: "failed",
         preview,
@@ -94,10 +113,16 @@ export function PricePredictor() {
 
   return (
     <section className={styles.card} aria-busy={state.step === "working"}>
-      {serviceDown && (
+      {service === "waking" && (
+        <div className={styles.banner} role="status">
+          Waking up the price service. It sleeps when nobody has used it for a while, so this can take up to a
+          minute.
+        </div>
+      )}
+      {service === "down" && (
         <div className={styles.banner} role="status">
           The price service isn&apos;t reachable right now.{" "}
-          <button className={styles.linkButton} onClick={() => serviceIsUp().then((up) => setServiceDown(!up))}>
+          <button className={styles.linkButton} onClick={checkService}>
             Check again
           </button>
         </div>
@@ -137,10 +162,13 @@ export function PricePredictor() {
 
           <div className={styles.panel} aria-live="polite">
             {state.step === "working" && (
-              <p className={styles.working}>
-                <span className={styles.spinner} aria-hidden="true" />
-                Estimating the price…
-              </p>
+              <>
+                <p className={styles.working}>
+                  <span className={styles.spinner} aria-hidden="true" />
+                  Estimating the price…
+                </p>
+                <SlowNote />
+              </>
             )}
             {state.step === "done" && <Result result={state.result} />}
             {state.step === "failed" && (
@@ -168,6 +196,22 @@ export function PricePredictor() {
         </div>
       )}
     </section>
+  );
+}
+
+// Shown when a photo takes a while, which on the free server usually means it
+// was asleep.
+function SlowNote() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShow(true), SLOW_NOTE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (!show) return null;
+  return (
+    <p className={styles.hint}>
+      Still working. If the service was asleep, the first photo can take up to a minute.
+    </p>
   );
 }
 

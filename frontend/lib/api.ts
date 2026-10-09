@@ -33,7 +33,9 @@ function kindForStatus(status: number): FailureKind {
   return "unavailable"; // 5xx, or the backend not running behind the /api route
 }
 
-export async function predictPrice(image: Blob, filename: string, timeoutMs = 30_000): Promise<Prediction> {
+// Long enough for a free server that has gone to sleep to wake up (up to a
+// minute) and then price the photo.
+export async function predictPrice(image: Blob, filename: string, timeoutMs = 90_000): Promise<Prediction> {
   // Only a file the browser couldn't shrink gets here this big (lib/image.ts).
   // Say so now rather than after uploading 10 MB the API would refuse.
   if (image.size > MAX_UPLOAD_BYTES) {

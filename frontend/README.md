@@ -46,6 +46,15 @@ connection out of step and failed the next request (Phase 6, bug 3 in
 
 See [`.env.example`](.env.example). Put overrides in `.env.local` (not committed).
 
+**Deployed** on Vercel, with `API_URL` pointing at the API on Render
+([`deploy/README.md`](../deploy/README.md)). A build on Vercel without
+`API_URL` stops with a message rather than sending photos to "localhost".
+
+The free API server sleeps when unused and takes up to a minute to wake, so
+the app waits up to 90 seconds for an answer. If the page's first check takes
+more than 4 seconds it says the service is waking up, and a photo still
+working after 8 seconds gets a note saying why.
+
 ## What's in it
 
 | File | What it does |
