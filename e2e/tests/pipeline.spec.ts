@@ -10,6 +10,7 @@ import {
   expectCents,
   expected,
   isPhone,
+  isRemote,
   photoBytes,
   photoPath,
   recordUploads,
@@ -198,6 +199,7 @@ test.describe("the server side, through the web app's /api", () => {
     const median = times[10];
     const p95 = times[18];
     testInfo.annotations.push({ type: "timing", description: `20 requests: median ${median.toFixed(0)} ms, 95th percentile ${p95.toFixed(0)} ms` });
-    expect(median).toBeLessThan(2000);
+    // The deployed API gets a tenth of a CPU (about 1.3 s of work per photo).
+    expect(median).toBeLessThan(isRemote ? 10_000 : 2000);
   });
 });

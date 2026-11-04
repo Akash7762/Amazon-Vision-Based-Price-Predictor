@@ -136,6 +136,13 @@ Environment variables, all optional:
 | `MAX_UPLOAD_MB` | `10` |
 | `MAX_IMAGE_PIXELS` | `50000000` |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` (comma-separated; for the Phase 5 frontend) |
+| `ORT_THREADS` | `0`: onnxruntime starts a thread per core. The Docker image sets `1`, for a server with a fraction of a CPU |
+
+## Docker
+
+[`deploy/api.Dockerfile`](../deploy/api.Dockerfile) packs the API and the
+model into one image; it's what runs on Render. See
+[`deploy/README.md`](../deploy/README.md).
 
 ## Tests
 
@@ -190,5 +197,5 @@ python -m pytest
   "this isn't something for sale".
 - HEIC (the iPhone default) isn't accepted; browsers usually convert to JPEG
   when uploading.
-- No authentication or rate limiting yet. Those belong with deployment
-  (Phase 7).
+- No authentication or rate limiting: the deployed demo is open to anyone
+  with the link, within the upload limits above.

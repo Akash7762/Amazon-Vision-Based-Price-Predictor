@@ -48,7 +48,13 @@ class Predictor:
                 f"{settings.model_path} doesn't match its model card (sha256 {self.sha256[:12]}... "
                 f"vs {self.card['sha256'][:12]}...). It may be damaged or a different model. {GET_MODEL}")
 
-        self.session = ort.InferenceSession(str(settings.model_path),
+        options = ort.SessionOptions()
+        if settings.ort_threads > 0:
+            # By default onnxruntime starts a thread per core it can see. A
+            # container capped at part of one core still sees all the host's
+            # cores, and those threads then just wait on each other.
+            options.intra_op_num_threads = settings.ort_threads
+        self.session = ort.InferenceSession(str(settings.model_path), options,
                                             providers=["CPUExecutionProvider"])
         self.input_size = int(self.session.get_inputs()[0].shape[1])
         self.calibration = json.loads(Path(settings.calibration_path).read_text())

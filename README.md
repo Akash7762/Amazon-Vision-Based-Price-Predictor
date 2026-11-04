@@ -39,7 +39,8 @@ service and a Next.js PWA.
 | Model export | ONNX, run with `onnxruntime` (no PyTorch needed to serve) |
 | Backend API | FastAPI + `onnxruntime` (no PyTorch) |
 | Frontend | Next.js 16 (React 19), installable PWA |
-| Containerization | Docker *(Phase 7)* |
+| Containerization | Docker: the API image ([`deploy/api.Dockerfile`](deploy/api.Dockerfile)), checked by GitHub Actions |
+| Hosting | Render (API) and Vercel (web app), free plans *(Phase 7)* |
 | Version control | Git + GitHub, Git LFS for weights |
 
 ## Dataset
@@ -72,7 +73,7 @@ for provenance and regeneration steps.
 ├── backend/       # FastAPI service: /predict, /health
 ├── frontend/      # Next.js web app (installable PWA)
 ├── e2e/           # end-to-end tests (Playwright) and the test photos
-├── deploy/        # Docker + deploy config   (Phase 7)
+├── deploy/        # the API's Docker image, a smoke test, the deployment guide
 └── docs/          # Kaggle guide, experiment log, evaluation and test reports
 ```
 
@@ -128,12 +129,18 @@ for provenance and regeneration steps.
   the range and a plain explanation, with clear messages when something goes
   wrong. Installable from Chrome/Edge; after one visit it opens offline
   (prices always come from the live model).
-- **End-to-end tests** — 34 Playwright tests in [`e2e/`](e2e/README.md) run
+- **End-to-end tests** — 36 Playwright tests in [`e2e/`](e2e/README.md) run
   the real app in desktop Chrome, desktop Edge and an emulated Android phone:
   real product photos priced exactly as the Phase 3 reference code prices
   them, failures, layouts from 320 to 1920 px, accessibility (no WCAG 2.2 AA
   issues), installability and offline start. They found 6 bugs, all fixed.
-  Report: [`docs/testing.md`](docs/testing.md).
+  Report: [`docs/testing.md`](docs/testing.md). The same tests can run
+  against the deployed site.
+- **Ready to deploy** — the API as a Docker image with the model inside
+  ([`deploy/api.Dockerfile`](deploy/api.Dockerfile)). GitHub Actions builds
+  it on every change and checks it under the free plan's limits (512 MB, a
+  tenth of a CPU). Step-by-step setup for Render (API) and Vercel (web app):
+  [`deploy/README.md`](deploy/README.md).
 
 **Known limits of the current model:**
 
@@ -150,17 +157,17 @@ for provenance and regeneration steps.
   multipack listings priced like a single unit (a 24-pack of water at $1.79).
 - Validation error stops improving after 2–4 epochs while training error
   keeps falling: the model memorises the training images.
-
 - **It reacts to how a product is turned.** On its side, a product can get
   twice its upright price, so the app asks for upright photos. Phone photos'
   rotation tags are applied first, so they are turned upright.
 
 **Not done yet:**
 
-- Checks on a real phone (camera, phone browsers): the checklist in
-  [`docs/testing.md`](docs/testing.md#2-cross-platform-mobile-and-desktop-parity)
-- Installing on a phone: needs HTTPS, which deployment (Phase 7) provides
-- Deployment (Phase 7)
+- Going live on Render and Vercel (Phase 7): the steps are in
+  [`deploy/README.md`](deploy/README.md)
+- Checks on a real phone (camera, phone browsers, installing): the checklist
+  in [`docs/testing.md`](docs/testing.md#2-cross-platform-mobile-and-desktop-parity),
+  once the app has its HTTPS address
 
 ## Setup
 

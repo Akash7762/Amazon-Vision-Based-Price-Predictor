@@ -8,8 +8,8 @@ produced them.
 | | |
 |---|---|
 | Backend tests | **54**: 31 with a stand-in model, 23 with the real one |
-| End-to-end tests | **34**, each in desktop Chrome, desktop Edge and an emulated Android phone: 86 runs, 16 skipped where they don't apply |
-| Stability | every end-to-end test run 3 times over: **258 of 258 passed** |
+| End-to-end tests | **36**, each in desktop Chrome, desktop Edge and an emulated Android phone: 92 runs, 16 skipped where they don't apply (34 in Phase 6; Phase 7 added the two for a sleeping server) |
+| Stability | every Phase 6 end-to-end test run 3 times over: **258 of 258 passed** |
 | Accessibility | 0 WCAG 2.2 A/AA violations on 4 screens, light and dark |
 | Bugs found and fixed | **6**, each with a test or a measurement showing the fix |
 
@@ -116,7 +116,11 @@ Simulated by intercepting the app's requests
 - service unreachable when the page opens: a banner; "Check again" clears it
 - service stops mid-way: a plain message, and "Try again" works once it's back
 - a 502 page or a server error: the same message, never the server's own text
-- no answer at all: gives up after 30 seconds with "Try again" (a fake clock,
+- a sleeping server (Phase 7): after 4 seconds without an answer the page
+  says the service is waking up, and a photo still working after 8 seconds
+  gets a note saying why; both go once it answers
+- no answer at all: gives up after 90 seconds (30 before Phase 7, too short
+  for the free server to wake) with "Try again" (a fake clock,
   so the test takes a second)
 - offline: says so, and works again once back online
 
