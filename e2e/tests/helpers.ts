@@ -27,6 +27,9 @@ export const photoBytes = (file: string) => fs.readFileSync(photoPath(file));
 
 export const isPhone = (testInfo: TestInfo) => !!testInfo.project.use.isMobile;
 
+/** Testing a deployed copy (E2E_BASE_URL) rather than one started here. */
+export const isRemote = !!process.env.E2E_BASE_URL;
+
 /** "$10.70" -> 10.7 */
 export const dollars = (text: string) => Number(text.replace(/[$,]/g, ""));
 

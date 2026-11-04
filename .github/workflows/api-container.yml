@@ -1,0 +1,49 @@
+name: API container
+
+# Builds the API's Docker image and checks it the way Render's free plan runs
+# it: 512 MB of memory and a tenth of a CPU. Nothing is published; Render
+# builds its own copy from the same Dockerfile.
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "backend/**"
+      - "model/**"
+      - "deploy/**"
+      - "e2e/fixtures/**"
+      - ".dockerignore"
+      - ".github/workflows/api-container.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "model/**"
+      - "deploy/**"
+      - "e2e/fixtures/**"
+      - ".dockerignore"
+      - ".github/workflows/api-container.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build the image
+        run: docker build -f deploy/api.Dockerfile -t price-api .
+
+      - name: Start it with the free plan's limits
+        run: docker run -d --name api --memory 512m --cpus 0.1 -p 8000:10000 price-api
+
+      - name: Check it answers with the reference prices
+        run: python3 deploy/smoke_test.py http://localhost:8000 --wait 180
+
+      - name: Memory use and server log
+        if: always()
+        run: |
+          docker stats --no-stream --format "memory in use: {{.MemUsage}}" api || true
+          docker logs api || true

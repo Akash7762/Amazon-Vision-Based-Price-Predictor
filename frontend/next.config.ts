@@ -7,6 +7,12 @@ import type { NextConfig } from "next";
 // the app is built (or when `next dev` starts), so set API_URL before that.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
+// On Vercel the API runs elsewhere (Render): refuse to build a site that would
+// send every photo to "localhost".
+if (process.env.VERCEL && !process.env.API_URL) {
+  throw new Error("Set API_URL to the API's address in Vercel (Settings > Environment Variables), then redeploy.");
+}
+
 const nextConfig: NextConfig = {
   // Don't let `next dev` write AI-agent instruction files into the project.
   agentRules: false,

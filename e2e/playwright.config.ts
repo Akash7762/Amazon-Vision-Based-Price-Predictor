@@ -8,20 +8,26 @@ import path from "node:path";
 export const API_PORT = 8100;
 export const WEB_PORT = 3100;
 
+// To test a deployed copy instead, set E2E_BASE_URL (https://<app>.vercel.app):
+// nothing is started here, the tests that need a server of their own are
+// skipped, and the free API server is woken up before the tests start.
+const remote = process.env.E2E_BASE_URL;
+
 const repo = path.resolve(__dirname, "..");
 const python =
   process.env.PYTHON ?? path.join(repo, "venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 export default defineConfig({
   testDir: "tests",
-  timeout: 60_000,
-  expect: { timeout: 15_000 },
+  globalSetup: require.resolve("./wake-remote"),
+  timeout: remote ? 120_000 : 60_000,
+  expect: { timeout: remote ? 30_000 : 15_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }], ["json", { outputFile: "test-results/results.json" }]],
   use: {
-    baseURL: `http://localhost:${WEB_PORT}`,
+    baseURL: remote ?? `http://localhost:${WEB_PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -32,7 +38,7 @@ export default defineConfig({
     { name: "desktop-edge", use: { ...devices["Desktop Edge"], channel: "msedge" } },
     { name: "android-phone", use: { ...devices["Pixel 7"], channel: "chrome" } },
   ],
-  webServer: [
+  webServer: remote ? undefined : [
     {
       command: `"${python}" -m uvicorn backend.app.main:app --port ${API_PORT} --timeout-keep-alive 75`,
       cwd: repo,

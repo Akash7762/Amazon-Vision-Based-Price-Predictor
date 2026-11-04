@@ -3,6 +3,7 @@
 import { expect, test } from "@playwright/test";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
+import { isRemote } from "./helpers";
 
 test("manifest has what an install needs, and every icon is the size it claims", async ({ request }) => {
   const manifest = await (await request.get("/manifest.webmanifest")).json();
@@ -59,6 +60,7 @@ async function serverUp() {
 
 test("after one visit it opens with the server switched off", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome", "starts its own server, once is enough");
+  test.skip(isRemote, "needs a server it can switch off: local only");
   const server = startServer();
   try {
     await expect.poll(serverUp, { timeout: 30_000 }).toBe(true);
