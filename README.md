@@ -3,13 +3,19 @@
 Estimates the price of a product from a photograph of it, using a fine-tuned
 vision model served through an API and an installable web app.
 
-> **Status: in development — Phases 0–6 of 10 complete.**
+> **Try it: https://amazon-vision-based-price-predictor.vercel.app** (installable on phones and PCs)
+>
+> **Status: in development — Phases 0–7 of 10 complete.**
 > Take or choose a product photo in the web app, and it shows an estimated
 > price with a calibrated range. On 11,028 held-out test images the model's
 > average error is **$11.27 per product**, against **$14.51** for always
 > guessing the median price (22% lower). The whole app is tested end to end
-> in desktop and phone browsers. See [Current status](#current-status) for
-> exactly what does and does not work today.
+> in desktop and phone browsers, and deployed on free hosting. See
+> [Current status](#current-status) for exactly what does and does not work
+> today.
+>
+> The free server sleeps when nobody has used it for 15 minutes; the first
+> photo after that can take up to a minute while it wakes.
 
 ---
 
@@ -40,7 +46,7 @@ service and a Next.js PWA.
 | Backend API | FastAPI + `onnxruntime` (no PyTorch) |
 | Frontend | Next.js 16 (React 19), installable PWA |
 | Containerization | Docker: the API image ([`deploy/api.Dockerfile`](deploy/api.Dockerfile)), checked by GitHub Actions |
-| Hosting | Render (API) and Vercel (web app), free plans *(Phase 7)* |
+| Hosting | Render (API, Docker) and Vercel (web app), free plans |
 | Version control | Git + GitHub, Git LFS for weights |
 
 ## Dataset
@@ -122,24 +128,29 @@ for provenance and regeneration steps.
   `POST /predict` takes a photo and returns the price with a range that held
   79.6% of real test prices (80% target); `GET /health` reports the model.
   It checks the model's sha256 at startup, rejects bad uploads with clear
-  errors (400/413/415), and has 54 tests, 23 of them with the real model.
-  About 0.1 s per request on the development PC's CPU.
+  errors (400/413/415), and has 57 tests, 23 of them with the real model.
+  About 0.1 s per request on the development PC's CPU, about 1 s on the
+  free server.
 - **Web app** — Next.js PWA in [`frontend/`](frontend/README.md). Take a
   photo (phones) or choose, drop or paste one (desktop); it shows the price,
   the range and a plain explanation, with clear messages when something goes
   wrong. Installable from Chrome/Edge; after one visit it opens offline
   (prices always come from the live model).
-- **End-to-end tests** — 36 Playwright tests in [`e2e/`](e2e/README.md) run
+- **End-to-end tests** — 37 Playwright tests in [`e2e/`](e2e/README.md) run
   the real app in desktop Chrome, desktop Edge and an emulated Android phone:
   real product photos priced exactly as the Phase 3 reference code prices
   them, failures, layouts from 320 to 1920 px, accessibility (no WCAG 2.2 AA
-  issues), installability and offline start. They found 6 bugs, all fixed.
-  Report: [`docs/testing.md`](docs/testing.md). The same tests can run
-  against the deployed site.
-- **Ready to deploy** — the API as a Docker image with the model inside
-  ([`deploy/api.Dockerfile`](deploy/api.Dockerfile)). GitHub Actions builds
-  it on every change and checks it under the free plan's limits (512 MB, a
-  tenth of a CPU). Step-by-step setup for Render (API) and Vercel (web app):
+  issues), installability and offline start. They found 7 bugs, all fixed.
+  Report: [`docs/testing.md`](docs/testing.md).
+- **Deployed** — https://amazon-vision-based-price-predictor.vercel.app. The
+  web app is on Vercel; the API runs on Render as a Docker image with the
+  model inside ([`deploy/api.Dockerfile`](deploy/api.Dockerfile)), both on
+  free plans and redeployed when `main` changes. GitHub Actions checks the
+  image on every change under the free plan's limits (512 MB, a tenth of a
+  CPU). On the live site the end-to-end tests pass (92 runs), and on a real
+  phone the camera, the gallery and installing all work. Running the tests
+  there found the free server running out of memory under 12 photos at
+  once; it now prices them one at a time. Setup and details:
   [`deploy/README.md`](deploy/README.md).
 
 **Known limits of the current model:**
@@ -161,13 +172,15 @@ for provenance and regeneration steps.
   twice its upright price, so the app asks for upright photos. Phone photos'
   rotation tags are applied first, so they are turned upright.
 
-**Not done yet:**
+**Limits of the free hosting:**
 
-- Going live on Render and Vercel (Phase 7): the steps are in
-  [`deploy/README.md`](deploy/README.md)
-- Checks on a real phone (camera, phone browsers, installing): the checklist
-  in [`docs/testing.md`](docs/testing.md#2-cross-platform-mobile-and-desktop-parity),
-  once the app has its HTTPS address
+- The API sleeps after 15 minutes without visitors; the first photo after
+  that can take up to a minute (the app says it's waking up).
+- Photos are priced one at a time, about a second each, so at busy moments
+  they wait their turn.
+- Uploads over 4.5 MB are refused by Vercel. Photos are shrunk in the
+  browser first, so this only affects files the browser can't read.
+- No login or rate limit: anyone with the link can use it.
 
 ## Setup
 
@@ -264,7 +277,7 @@ Step-by-step instructions are in
 - [x] **Phase 4** — FastAPI backend
 - [x] **Phase 5** — Next.js PWA frontend (installing on a phone waits for HTTPS in Phase 7)
 - [x] **Phase 6** — Integration and end-to-end testing (real-phone checks: the checklist in `docs/testing.md`)
-- [ ] **Phase 7** — Deployment
+- [x] **Phase 7** — Deployment: [live](https://amazon-vision-based-price-predictor.vercel.app) on Vercel and Render
 - [ ] **Phase 8** — Documentation and repo polish
 - [ ] **Phase 9** — Final presentation
 
