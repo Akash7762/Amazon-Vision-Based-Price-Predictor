@@ -46,7 +46,8 @@ connection out of step and failed the next request (Phase 6, bug 3 in
 
 See [`.env.example`](.env.example). Put overrides in `.env.local` (not committed).
 
-**Deployed** on Vercel, with `API_URL` pointing at the API on Render
+**Deployed** at https://amazon-vision-based-price-predictor.vercel.app on
+Vercel, with `API_URL` pointing at the API on Render
 ([`deploy/README.md`](../deploy/README.md)). A build on Vercel without
 `API_URL` stops with a message rather than sending photos to "localhost".
 
@@ -96,11 +97,10 @@ networks; allow it. This is plain HTTP, so the phone won't offer a real
 install or offline support, but the camera, the upload and the layout can all
 be checked.
 
-**Phone, installed:** needs an HTTPS address. Deploying (Phase 7) gives one.
-To try it sooner, an HTTPS tunnel to the PC such as Cloudflare's
-`cloudflared` works: `cloudflared tunnel --url http://localhost:3000` prints an
-`https://…trycloudflare.com` address to open on the phone. Then Chrome offers
-*Install app* and Safari has *Share → Add to Home Screen*.
+**Phone, installed:** needs an HTTPS address, which the deployed app has:
+open https://amazon-vision-based-price-predictor.vercel.app, then Chrome's
+menu → *Install app*, or Safari's *Share → Add to Home Screen* (installing on
+a real phone was checked in Phase 7).
 
 ## Checked in Phase 5
 
