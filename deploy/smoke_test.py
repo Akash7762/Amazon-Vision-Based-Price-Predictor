@@ -9,6 +9,11 @@ three test photos get their reference prices, and a non-image is refused.
 Python's standard library only, so it runs anywhere without installing
 anything. The expected answers are e2e/fixtures/expected.json (Phase 6).
 --wait gives a sleeping free server time to wake up first.
+
+Load checks (the free server once fell over under them):
+
+    --burst 12 --burst-photo photo-1600.jpg   12 uploads of that photo at once
+    --also big.jpg                            more photos that just need an answer
 """
 import argparse
 import json
@@ -17,6 +22,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parents[1] / "e2e" / "fixtures"
@@ -66,6 +72,10 @@ def main():
     ap = argparse.ArgumentParser(description="Check a running copy of the price API.")
     ap.add_argument("base", help="where the API answers, e.g. http://localhost:8000 or https://<app>.vercel.app/api")
     ap.add_argument("--wait", type=int, default=90, help="seconds to wait for it to come up (default 90)")
+    ap.add_argument("--burst", type=int, default=0, help="also send this many uploads at once")
+    ap.add_argument("--burst-photo", type=Path, default=FIXTURES / "photos" / "olive-oil.jpg",
+                    help="the photo the burst sends (default: a test photo)")
+    ap.add_argument("--also", type=Path, nargs="*", default=[], help="more photos that must get an answer")
     args = ap.parse_args()
     base = args.base.rstrip("/")
     expected = json.loads((FIXTURES / "expected.json").read_text())
@@ -95,6 +105,23 @@ def main():
 
     status, body, _ = upload(base, "notes.txt", b"not a photo", "text/plain")
     check(status == 415, f"a text file is refused with 415 (got {status})")
+
+    for path in args.also:
+        status, body, seconds = upload(base, path.name, path.read_bytes(), "image/jpeg")
+        check(status == 200, f"{path.name}: HTTP {status}, {seconds:.1f} s"
+                             + (f", ${body['price']:.2f}" if status == 200 else f" {body}"))
+
+    if args.burst:
+        data = args.burst_photo.read_bytes()
+        with ThreadPoolExecutor(args.burst) as pool:
+            answers = list(pool.map(lambda i: upload(base, f"burst-{i}.jpg", data, "image/jpeg"), range(args.burst)))
+        ok = [a for a in answers if a[0] == 200]
+        prices = {a[1]["price"] for a in ok}
+        check(len(ok) == args.burst and len(prices) == 1,
+              f"{args.burst} uploads of {args.burst_photo.name} at once: {len(ok)} answered "
+              f"(statuses {sorted(a[0] for a in answers)}), slowest {max(a[2] for a in answers):.1f} s")
+        status, _, _ = call(f"{base}/health")
+        check(status == 200, f"still up afterwards (health: HTTP {status})")
 
     if failures:
         sys.exit(f"\n{len(failures)} check(s) failed")
