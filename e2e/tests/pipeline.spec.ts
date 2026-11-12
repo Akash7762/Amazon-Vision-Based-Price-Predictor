@@ -47,8 +47,9 @@ test("a big photo is shrunk to a 1600 px JPEG before upload, and the price barel
   await recordUploads(page);
   await page.goto("/");
   // Vercel turns away any request over 4.5 MB, and this test also sends the
-  // photo whole: on the deployed site it's 2000 px (2.8 MB) instead of 3000 (6.3 MB).
-  const png = await bigPhoto(page, expected.photos[1].file, isRemote ? 2000 : 3000);
+  // photo whole: on the deployed site it's 2000 px (3.3 MB) instead of 3000 (6.3 MB).
+  const size = isRemote ? 2000 : 3000;
+  const png = await bigPhoto(page, expected.photos[1].file, size);
   expect(png.length).toBeLessThan(isRemote ? 4 * 1024 * 1024 : 10 * 1024 * 1024);
 
   // The same photo sent whole, so the API does all the shrinking itself.
@@ -62,7 +63,7 @@ test("a big photo is shrunk to a 1600 px JPEG before upload, and the price barel
   const shown = await shownEstimate(page);
   testInfo.annotations.push({
     type: "timing",
-    description: `3000x3000 PNG (${(png.length / 1024 / 1024).toFixed(1)} MB): ${Date.now() - started} ms to price on screen`,
+    description: `${size}x${size} PNG (${(png.length / 1024 / 1024).toFixed(1)} MB): ${Date.now() - started} ms to price on screen`,
   });
 
   const [sent] = await uploads(page);
