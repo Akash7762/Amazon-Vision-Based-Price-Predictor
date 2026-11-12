@@ -1,6 +1,9 @@
 """API tests against the stand-in model (see conftest.py)."""
 import io
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
@@ -156,6 +159,34 @@ def test_size_error_still_carries_cors_headers(client):
 
 
 # --- settings ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("limit, most_at_once", [(1, 1), (0, None)])
+def test_concurrent_predictions_limit(settings, white_png, monkeypatch, limit, most_at_once):
+    # Six uploads at once; count how many are being priced at the same moment.
+    monkeypatch.setenv("MAX_CONCURRENT_PREDICTIONS", str(limit))
+    assert Settings.from_env().max_concurrent_predictions == limit
+    with TestClient(create_app(replace(settings, max_concurrent_predictions=limit))) as c:
+        predictor = c.app.state.predictor
+        real_predict, lock, now, peak = predictor.predict, threading.Lock(), [0], [0]
+
+        def slow_predict(img):
+            with lock:
+                now[0] += 1
+                peak[0] = max(peak[0], now[0])
+            time.sleep(0.1)
+            with lock:
+                now[0] -= 1
+            return real_predict(img)
+
+        predictor.predict = slow_predict
+        with ThreadPoolExecutor(6) as pool:
+            codes = list(pool.map(lambda _: post(c, white_png).status_code, range(6)))
+    assert codes == [200] * 6
+    if most_at_once:
+        assert peak[0] == most_at_once
+    else:
+        assert peak[0] > 1  # without a limit they do overlap, so the check above means something
+
 
 def test_thread_setting_reaches_onnxruntime(settings, monkeypatch):
     monkeypatch.setenv("ORT_THREADS", "1")

@@ -17,7 +17,8 @@ refuses to start if it's missing or doesn't match its model card.
 CPU-bound inference doesn't block other requests.
 """
 import logging
-from contextlib import asynccontextmanager
+import threading
+from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,17 +85,24 @@ def create_app(settings=None):
         return Health(status="ok", model_version=p.version, model_sha256=p.sha256,
                       input_size=p.input_size, range_coverage=p.calibration["coverage"])
 
+    # Every photo being priced holds its decoded image and the model's working
+    # memory. On the 512 MB free server, 12 photo-sized uploads at once took it
+    # down (Phase 7), so there they're priced one at a time; the rest wait.
+    limit = settings.max_concurrent_predictions
+    one_at_a_time = threading.BoundedSemaphore(limit) if limit > 0 else nullcontext()
+
     @app.post("/predict", response_model=Prediction, responses=ERRORS)
     def predict(request: Request,
                 file: UploadFile = File(description="Product photo: JPEG, PNG or WebP")):
-        try:
-            check_declared_type(file.content_type)
-            data = read_upload(file.file, settings.max_upload_bytes)
-            img = open_image(data, settings.max_image_pixels)
-        except UploadError as e:
-            raise HTTPException(status_code=e.status, detail=e.detail)
-        with img:
-            return request.app.state.predictor.predict(img)
+        with one_at_a_time:
+            try:
+                check_declared_type(file.content_type)
+                data = read_upload(file.file, settings.max_upload_bytes)
+                img = open_image(data, settings.max_image_pixels)
+            except UploadError as e:
+                raise HTTPException(status_code=e.status, detail=e.detail)
+            with img:
+                return request.app.state.predictor.predict(img)
 
     return app
 

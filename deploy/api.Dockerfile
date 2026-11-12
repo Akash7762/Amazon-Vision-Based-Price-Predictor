@@ -27,10 +27,18 @@ RUN python backend/download_model.py
 COPY model/__init__.py model/predict_onnx.py model/preprocessing.py model/price_range.py model/
 COPY backend/ backend/
 
-# Render's free plan gives the container a tenth of a CPU: one inference thread
-# uses it fully, more would only queue for it. PORT is what Render tells the
-# app to listen on.
+# Render's free plan: a tenth of a CPU and 512 MB of memory.
+# - one inference thread uses that CPU fully; more would only queue for it
+# - one photo at a time (the rest wait): 12 photo-sized uploads at once took
+#   the server down, each holding its decoded image and the model's memory
+# - glibc otherwise keeps a memory pool per thread and holds on to freed memory
+# - images over 16 million pixels are refused; photos from the web app are
+#   1600 px at most (2.6 million), and one 48 MP photo would fill the memory
+# PORT is what Render tells the app to listen on.
 ENV ORT_THREADS=1 \
+    MAX_CONCURRENT_PREDICTIONS=1 \
+    MALLOC_ARENA_MAX=2 \
+    MAX_IMAGE_PIXELS=16000000 \
     PORT=10000
 
 RUN useradd --create-home --uid 1000 app

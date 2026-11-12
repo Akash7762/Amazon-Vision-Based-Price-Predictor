@@ -46,8 +46,10 @@ test("each test photo gets the reference price and range on screen", async ({ pa
 test("a big photo is shrunk to a 1600 px JPEG before upload, and the price barely moves", async ({ page, request }, testInfo) => {
   await recordUploads(page);
   await page.goto("/");
-  const png = await bigPhoto(page, expected.photos[1].file, 3000);
-  expect(png.length).toBeLessThan(10 * 1024 * 1024);
+  // Vercel turns away any request over 4.5 MB, and this test also sends the
+  // photo whole: on the deployed site it's 2000 px (2.8 MB) instead of 3000 (6.3 MB).
+  const png = await bigPhoto(page, expected.photos[1].file, isRemote ? 2000 : 3000);
+  expect(png.length).toBeLessThan(isRemote ? 4 * 1024 * 1024 : 10 * 1024 * 1024);
 
   // The same photo sent whole, so the API does all the shrinking itself.
   const whole = await request.post("/api/predict", {
@@ -144,7 +146,18 @@ test.describe("files the app can't price", () => {
     await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
     expect(await uploads(page)).toEqual([]);
   });
+
+  test("over Vercel's 4.5 MB and unreadable by the browser: a plain 'too large'", async ({ page }) => {
+    test.skip(!isRemote, "Vercel's own limit: only on the deployed site");
+    await page.goto("/");
+    await choose(page, { name: "IMG_0008.heic", mimeType: "image/heic", buffer: Buffer.alloc(6 * 1024 * 1024, 1) });
+    await expect(errorMessage(page)).toHaveText("That photo is too large. Try a smaller one.");
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  });
 });
+
+// On the deployed site Vercel's edge, not the app's own Next.js server, handles big bodies.
+const VERCEL_LIMIT = "Vercel refuses requests over 4.5 MB itself, before the app's server sees them";
 
 // The rest talk to the server directly; the browser doesn't matter, so once is enough.
 test.describe("the server side, through the web app's /api", () => {
@@ -155,6 +168,7 @@ test.describe("the server side, through the web app's /api", () => {
   const form = (name: string, buffer: Buffer) => ({ multipart: { file: { name, mimeType: "image/jpeg", buffer } } });
 
   test("an upload over the limit is refused without breaking the next one", async ({ request }) => {
+    test.skip(isRemote, VERCEL_LIMIT);
     // Next.js used to pass on only the first 10 MB of such an upload, which left
     // the API's connection out of step: the next photo failed with a 500.
     const photo = expected.photos[0];
@@ -170,6 +184,7 @@ test.describe("the server side, through the web app's /api", () => {
   });
 
   test("a file just under 10 MB is passed on whole", async ({ request }) => {
+    test.skip(isRemote, VERCEL_LIMIT);
     // With the form around it the request is just over 10 MB. Cut short there,
     // the API would wait for the rest and the request would hang.
     const almost = await request.post("/api/predict", form("photo.jpg", Buffer.alloc(10 * 1024 * 1024 - 50, 7)));
