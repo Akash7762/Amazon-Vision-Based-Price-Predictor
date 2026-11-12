@@ -36,18 +36,26 @@ test("Chrome finds nothing stopping an install", async ({ page }) => {
 const OFFLINE_PORT = 3101;
 const frontend = path.resolve(__dirname, "..", "..", "frontend");
 
+// In its own process group off Windows, so stopping it stops anything it started too.
+const windows = process.platform === "win32";
+
 function startServer() {
   return spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--port", String(OFFLINE_PORT)], {
     cwd: frontend,
     env: { ...process.env, NEXT_DIST_DIR: ".next-e2e" },
     stdio: "ignore",
+    detached: !windows,
   });
 }
 
 function stopServer(server: ChildProcess) {
   if (server.exitCode !== null || !server.pid) return;
-  if (process.platform === "win32") execSync(`taskkill /pid ${server.pid} /T /F`, { stdio: "ignore" });
-  else server.kill();
+  try {
+    if (windows) execSync(`taskkill /pid ${server.pid} /T /F`, { stdio: "ignore" });
+    else process.kill(-server.pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
 }
 
 async function serverUp() {
