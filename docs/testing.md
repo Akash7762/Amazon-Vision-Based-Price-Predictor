@@ -7,11 +7,13 @@ produced them.
 
 | | |
 |---|---|
-| Backend tests | **54**: 31 with a stand-in model, 23 with the real one |
-| End-to-end tests | **36**, each in desktop Chrome, desktop Edge and an emulated Android phone: 92 runs, 16 skipped where they don't apply (34 in Phase 6; Phase 7 added the two for a sleeping server) |
+| Backend tests | **57**: 34 with a stand-in model, 23 with the real one |
+| End-to-end tests | **37**, each in desktop Chrome, desktop Edge and an emulated Android phone: 92 runs, 19 skipped where they don't apply (34 in Phase 6; Phase 7 added two for a sleeping server and one for Vercel's upload limit) |
+| Against the live site (Phase 7) | the same suite: **92 passed**, 19 skipped |
 | Stability | every Phase 6 end-to-end test run 3 times over: **258 of 258 passed** |
 | Accessibility | 0 WCAG 2.2 A/AA violations on 4 screens, light and dark |
-| Bugs found and fixed | **6**, each with a test or a measurement showing the fix |
+| Real phone and PC | camera, gallery and installing all worked on the live site |
+| Bugs found and fixed | **7**: 6 in Phase 6, 1 on the live site in Phase 7, each with a test or a measurement showing the fix |
 
 ## How to run them
 
@@ -96,17 +98,18 @@ same photo gets the same price in all three. On top of that
 Chrome never offers to install.
 
 **On real devices** (can't be automated: a real camera, real phone browsers,
-the install prompt). Run the app with `start-app.bat` and fill in:
+the install prompt), done on the live HTTPS site in Phase 7,
+https://amazon-vision-based-price-predictor.vercel.app:
 
 | # | Check | Result |
 |---|---|---|
-| D1 | Desktop Chrome or Edge: install from the address bar; the app opens in its own window and prices a photo | not run yet |
-| D2 | Desktop: drag a photo from File Explorer onto the box | not run yet |
-| P1 | Phone on the same Wi-Fi, `http://<PC's IP>:3000`: the page fits the screen | not run yet |
-| P2 | Phone: "Take a photo" opens the back camera; a product photo gets a price | not run yet |
-| P3 | Phone: "Choose a photo" picks from the gallery; the photo shows upright and gets a price | not run yet |
-| P4 | Phone: a photo gets about the same price as the same file priced on the PC | not run yet |
-| P5 | Phone: install to the home screen | needs HTTPS: Phase 7 |
+| P1 | Phone: the page fits the screen | ✅ |
+| P2 | Phone: "Take a photo" opens the back camera; a product photo gets a price | ✅ |
+| P3 | Phone: "Choose a photo" picks from the gallery; the photo shows upright and gets a price | ✅ |
+| P4 | Phone: install to the home screen | ✅ installed |
+| P5 | Phone: the installed app, opened in airplane mode, says the price service isn't reachable | not run (the offline start is covered by `pwa.spec.ts`) |
+| D1 | Desktop Chrome or Edge: install from the address bar; the app opens in its own window and prices a photo | ✅ |
+| D2 | Desktop: drag a photo from File Explorer onto the box | not run (dropping is covered by `pipeline.spec.ts`) |
 
 ## 3. When things go wrong
 
@@ -134,6 +137,7 @@ Simulated by intercepting the app's requests
 | 4 | Now and then a 500: Node.js (inside Next.js) and uvicorn both drop idle connections after 5 s, so a request could go down a connection the API was just closing. **8 of 432** requests failed in a stress test | a single "socket hang up" in one end-to-end run, then reproduced | uvicorn `--timeout-keep-alive 75`, longer than anything in front of it | **0 of 432** |
 | 5 | The page's first service check could answer after an upload and overwrite it: the "service unreachable" banner disappeared after a failed upload, or could appear next to a price | 1 failure in 258 during a 3× repeat run | an upload's outcome now beats an older check | end-to-end test, 258/258 since |
 | 6 | `/health` waited in the same queue as photo pricing: with 48 uploads running, median **592 ms**, 95th percentile 1.4 s, enough to time out the page's check on a busy server | looking into bug 5 | `/health` answers on the event loop | median **44 ms**, 95th 337 ms |
+| 7 | *(Phase 7, live site)* 12 photo-sized uploads at once crashed the free API server: 4 answered, then 502s and over 30 s down. Render's events: "Ran out of memory (used over 512MB)" | the end-to-end tests run against the live site, then a burst of 12 uploads | photos priced one at a time on the free server, fewer glibc memory pools, a 16 MP cap ([`deploy/README.md`](../deploy/README.md)) | **12 of 12** answered, server still up |
 
 ## What the testing showed about the model
 

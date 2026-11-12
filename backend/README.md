@@ -134,9 +134,10 @@ Environment variables, all optional:
 | `CALIBRATION_PATH` | `backend/calibration.json` |
 | `MODEL_VERSION` | `v0.1-model` |
 | `MAX_UPLOAD_MB` | `10` |
-| `MAX_IMAGE_PIXELS` | `50000000` |
+| `MAX_IMAGE_PIXELS` | `50000000` (the Docker image: `16000000`, for 512 MB of memory) |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` (comma-separated; for the Phase 5 frontend) |
 | `ORT_THREADS` | `0`: onnxruntime starts a thread per core. The Docker image sets `1`, for a server with a fraction of a CPU |
+| `MAX_CONCURRENT_PREDICTIONS` | `0`: no limit. The Docker image sets `1`: on the 512 MB free server, 12 photos priced at once ran it out of memory, so they take turns |
 
 ## Docker
 
@@ -150,9 +151,9 @@ model into one image; it's what runs on Render. See
 python -m pytest
 ```
 
-54 tests, about 6 seconds.
+57 tests, about 8 seconds.
 
-- **31 use a tiny stand-in model** with the real model's inputs and outputs
+- **34 use a tiny stand-in model** with the real model's inputs and outputs
   (`tests/conftest.py`), so they run without the 112 MB file. They cover the
   answers, every rejection, CORS, the startup checks, image handling and the
   price range. Each of the subtlest ones (transparent PNGs, phone-photo
