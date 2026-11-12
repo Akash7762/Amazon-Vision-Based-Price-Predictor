@@ -31,7 +31,7 @@ python -m pytest
 ```
 
 ```bash
-cd frontend && npm run lint && npx tsc --noEmit && npm run build
+cd frontend && npm run lint && npm run build     # the build type-checks too
 ```
 
 ```bash
