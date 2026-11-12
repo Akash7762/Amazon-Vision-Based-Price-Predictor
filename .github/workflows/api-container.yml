@@ -39,8 +39,24 @@ jobs:
       - name: Start it with the free plan's limits
         run: docker run -d --name api --memory 512m --cpus 0.1 -p 8000:10000 price-api
 
-      - name: Check it answers with the reference prices
-        run: python3 deploy/smoke_test.py http://localhost:8000 --wait 180
+      - name: Make photo-sized test images (with the Pillow inside the image)
+        run: |
+          docker exec api python -c "from PIL import Image; Image.effect_noise((1600, 1600), 60).convert('RGB').save('/tmp/photo-1600.jpg', quality=92); Image.linear_gradient('L').resize((4000, 4000)).convert('RGB').save('/tmp/photo-16mp.jpg', quality=85)"
+          docker cp api:/tmp/photo-1600.jpg .
+          docker cp api:/tmp/photo-16mp.jpg .
+
+      # 12 photo-sized uploads at once took the 512 MB free server down once;
+      # the biggest image it accepts (16 MP) must not either.
+      - name: Check it answers with the reference prices, and survives load
+        run: >
+          python3 deploy/smoke_test.py http://localhost:8000 --wait 180
+          --also photo-16mp.jpg --burst 12 --burst-photo photo-1600.jpg
+
+      - name: Check the container wasn't killed for running out of memory
+        if: always()
+        run: |
+          echo "OOMKilled: $(docker inspect -f '{{.State.OOMKilled}}' api), restarts: $(docker inspect -f '{{.RestartCount}}' api), running: $(docker inspect -f '{{.State.Running}}' api)"
+          test "$(docker inspect -f '{{.State.OOMKilled}}' api)" = "false"
 
       - name: Memory use and server log
         if: always()

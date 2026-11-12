@@ -11,6 +11,8 @@ in the tests and (Phase 7) in Docker.
     ALLOWED_ORIGINS     comma-separated, for CORS   default http://localhost:3000 (Next.js dev server)
     ORT_THREADS         threads per inference       default 0: onnxruntime decides (one per core);
                                                     1 on a server with a fraction of a CPU
+    MAX_CONCURRENT_PREDICTIONS  photos priced at once   default 0: no limit; 1 on a small server,
+                                                    where the others wait their turn
 """
 import os
 from dataclasses import dataclass
@@ -29,6 +31,7 @@ class Settings:
     max_image_pixels: int = 50_000_000
     allowed_origins: tuple = ("http://localhost:3000",)
     ort_threads: int = 0
+    max_concurrent_predictions: int = 0
 
     @property
     def max_upload_bytes(self):
@@ -48,4 +51,5 @@ class Settings:
             allowed_origins=tuple(o.strip() for o in env("ALLOWED_ORIGINS", ",".join(cls.allowed_origins)).split(",")
                                   if o.strip()),
             ort_threads=int(env("ORT_THREADS", cls.ort_threads)),
+            max_concurrent_predictions=int(env("MAX_CONCURRENT_PREDICTIONS", cls.max_concurrent_predictions)),
         )
