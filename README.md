@@ -300,6 +300,7 @@ Full report: [`docs/testing.md`](docs/testing.md).
 | [`docs/testing.md`](docs/testing.md) | what is tested, the bugs found and fixed, timings |
 | [`deploy/README.md`](deploy/README.md) | the live deployment: setup, what was checked, the free plans' limits |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how to work on the project |
+| [`docs/presentation/`](docs/presentation/) | the 10-minute demo script, where each part of the report comes from, and likely viva questions with answers |
 
 ## Roadmap
 
@@ -312,7 +313,7 @@ Full report: [`docs/testing.md`](docs/testing.md).
 - [x] **Phase 6** — Integration and end-to-end testing (`v1.0`)
 - [x] **Phase 7** — Deployment on Render and Vercel (`v1.1`)
 - [x] **Phase 8** — Documentation and repo polish
-- [ ] **Phase 9** — Final presentation
+- [x] **Phase 9** — Final presentation and viva preparation ([`docs/presentation/`](docs/presentation/))
 
 Every number in this repository comes from a run that was actually executed
 and logged; none are estimated ahead of the run that produces them.
